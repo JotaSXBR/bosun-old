@@ -8,7 +8,11 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
 import { googleRedirectUri } from "@/app/api/integrations/google/redirect";
-import { getGoogleConnectionStatus, listChannelConnections } from "@/server/services";
+import {
+  getGoogleConnectionStatus,
+  getGoogleContactsSyncSummary,
+  listChannelConnections,
+} from "@/server/services";
 import { requireTenantContext } from "@/server/tenant";
 
 import { ConnectionActions } from "./connection-actions";
@@ -38,6 +42,8 @@ export default async function IntegrationsPage({
   const ctx = await requireTenantContext();
   const connections = await listChannelConnections(ctx);
   const google = await getGoogleConnectionStatus(ctx);
+  const googleSync =
+    google?.status === "connected" ? await getGoogleContactsSyncSummary(ctx) : null;
   const { google: googleFlash } = await searchParams;
   // §7.7 of the IA spec: integrations:manage — was `role !== "agent"`,
   // which wrongly included the read-only viewer.
@@ -70,6 +76,7 @@ export default async function IntegrationsPage({
             lastError: google.lastError,
           }
         }
+        sync={googleSync}
         canManage={canManage}
         redirectUri={googleRedirectUri()}
         flash={googleFlash ?? null}

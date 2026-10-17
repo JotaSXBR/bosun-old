@@ -3,6 +3,7 @@ export {
   enqueueChannelEventProcessed,
   enqueueChannelReconcile,
   enqueueContactAvatar,
+  enqueueContactGoogleSync,
   enqueueGenerateDraft,
   enqueueObserverAnalyze,
   enqueueOrganizationOnboarding,
@@ -15,6 +16,8 @@ export {
 } from "./tasks/channel-messages-reconcile";
 export type { ContactAvatarPayload } from "./tasks/contact-avatar";
 export { contactAvatarHandler, contactAvatarPayload } from "./tasks/contact-avatar";
+export type { ContactGoogleSyncPayload } from "./tasks/contact-google-sync";
+export { contactGoogleSyncHandler, contactGoogleSyncPayload } from "./tasks/contact-google-sync";
 export type { GenerateDraftPayload } from "./tasks/generate-draft";
 export { generateDraftHandler, generateDraftPayload } from "./tasks/generate-draft";
 export type { ObserverAnalyzePayload } from "./tasks/observer-analyze";

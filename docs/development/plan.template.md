@@ -13,6 +13,16 @@
 <decisões tomadas no gate de esclarecimento — o porquê, não só o quê;
 provisórias ficam marcadas como tal>
 
+## Fontes consultadas
+
+<!-- Regra "docs antes de código": decisão sobre biblioteca/API externa se
+     apoia em documentação atual da versão em uso (Context7 para libs, docs
+     oficiais para APIs de provedores, tipos instalados como fallback).
+     Dúvida nova durante o build entra aqui ANTES do código. -->
+
+| Tema | Versão / alvo | Fonte | Data | O que confirmou |
+| ---- | ------------- | ----- | ---- | --------------- |
+
 ## Escopo
 
 <!-- Globs relativos à raiz. O hook bloqueia edições fora daqui.

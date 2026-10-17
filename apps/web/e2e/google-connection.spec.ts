@@ -44,4 +44,6 @@ test("Google Contacts card: save client, start consent, reject a forged callback
   // .first(): in dev the load-time toast has rendered twice (cause not confirmed).
   await expect(page.getByText("Autorização expirada. Conecte de novo.").first()).toBeVisible();
   await expect(page.getByTestId("google-status")).toHaveText("aguardando autorização");
+  // Nothing is sent before a connected account exists.
+  await expect(card.getByRole("button", { name: "Sincronizar agora" })).toHaveCount(0);
 });

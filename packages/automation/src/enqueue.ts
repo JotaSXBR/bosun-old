@@ -6,6 +6,7 @@ import { fromDrizzle } from "pg-boss";
 import { getBoss, QUEUES, startJobs } from "./boss";
 import type { ChannelReconcilePayload } from "./tasks/channel-messages-reconcile";
 import type { ContactAvatarPayload } from "./tasks/contact-avatar";
+import type { ContactGoogleSyncPayload } from "./tasks/contact-google-sync";
 import type { GenerateDraftPayload } from "./tasks/generate-draft";
 import type { ObserverAnalyzePayload } from "./tasks/observer-analyze";
 import type { OrganizationOnboardingPayload } from "./tasks/organization-onboarding";
@@ -112,4 +113,32 @@ export async function enqueueTranscribeAudio(
   tx?: DbExecutor,
 ): Promise<{ skipped: boolean }> {
   return send(QUEUES.transcribeAudio, payload, tx);
+}
+
+/**
+ * Enqueues a Google mirror of one contact. The `singletonKey` makes the
+ * `key_strict_fifo` queue run one job at a time per organization (the
+ * People API wants sequential mutations per account).
+ */
+export async function enqueueContactGoogleSync(
+  payload: ContactGoogleSyncPayload,
+  tx?: DbExecutor,
+): Promise<{ skipped: boolean }> {
+  const boss = getBoss();
+  if (!boss) {
+    startJobs().catch(() => {});
+    logger.warn("jobs not started; skipping enqueue", { queue: QUEUES.contactGoogleSync });
+    return { skipped: true };
+  }
+  await boss.send(QUEUES.contactGoogleSync, payload, {
+    singletonKey: `google:${payload.organizationId}`,
+    // A job past this limit lands in `failed`, which holds the org's key; the
+    // default (15 min) would stall the org for that long. A client call
+    // (4 attempts, 15 s each + backoff) fits well inside it.
+    // shortcut: no sweep for `failed` jobs, add one if a stuck key is ever seen.
+    expireInSeconds: 120,
+    retryLimit: 0,
+    ...(tx ? { db: fromDrizzle(tx, sql) } : {}),
+  });
+  return { skipped: false };
 }

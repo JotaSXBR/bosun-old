@@ -184,6 +184,89 @@ export async function verifyGoogleConnection(
   });
 }
 
+const TOKEN_MARGIN_MS = 60_000;
+
+async function renewAccessToken(
+  db: Database,
+  row: ExternalConnectionRow,
+  oauth: GoogleOAuthClient,
+): Promise<{ accessToken: string } | null> {
+  const bundle = openBundle(row);
+  const tokens = bundle.tokens;
+  if (!tokens) return null;
+  try {
+    const refreshed = await oauth.refreshAccessToken({
+      clientId: bundle.clientId,
+      clientSecret: bundle.clientSecret,
+      refreshToken: tokens.refreshToken,
+    });
+    await withTenant(db, row.organizationId, (tx) =>
+      updateConnection(tx, row.id, {
+        bundleEncrypted: encryptJson({ ...bundle, tokens: { ...tokens, ...refreshed } }),
+        lastCheckedAt: new Date(),
+        lastError: null,
+      }),
+    );
+    return { accessToken: refreshed.accessToken };
+  } catch (error) {
+    if (!(error instanceof GoogleOAuthError) || error.code !== "invalid_grant") throw error;
+    await withTenant(db, row.organizationId, (tx) =>
+      updateConnection(tx, row.id, {
+        status: "needs_reauth",
+        lastCheckedAt: new Date(),
+        lastError: error.code,
+      }),
+    );
+    return null;
+  }
+}
+
+/**
+ * Internal — trusted system path (the contact sync job), no role check. A
+ * usable access token for the org's connected Google account, renewed and
+ * persisted when it is (about to be) expired. `invalid_grant` marks the
+ * connection `needs_reauth` and returns null, as does a missing or not
+ * `connected` account; any other refresh failure rethrows and leaves the
+ * connection untouched.
+ */
+export async function getGoogleAccessToken(
+  db: Database,
+  organizationId: string,
+  oauth: GoogleOAuthClient = createGoogleOAuthClient(),
+): Promise<{ accessToken: string } | null> {
+  const row = await withTenant(db, organizationId, (tx) =>
+    findConnection(tx, organizationId, PROVIDER),
+  );
+  if (row?.status !== "connected") return null;
+  const tokens = openBundle(row).tokens;
+  if (!tokens) return null;
+  if (Date.parse(tokens.expiresAt) - Date.now() > TOKEN_MARGIN_MS) {
+    return { accessToken: tokens.accessToken };
+  }
+  return renewAccessToken(db, row, oauth);
+}
+
+/**
+ * Internal — trusted system path. Google rejected a valid-looking token
+ * (revoked consent or scope): flag the connection so the UI asks to reconnect
+ * instead of every contact failing silently.
+ */
+export async function markGoogleNeedsReauth(
+  db: Database,
+  organizationId: string,
+  lastError: string,
+): Promise<void> {
+  await withTenant(db, organizationId, async (tx) => {
+    const row = await findConnection(tx, organizationId, PROVIDER);
+    if (row?.status !== "connected") return;
+    await updateConnection(tx, row.id, {
+      status: "needs_reauth",
+      lastCheckedAt: new Date(),
+      lastError,
+    });
+  });
+}
+
 /**
  * Requires integrations:manage. Removes the connection, then revokes the
  * refresh token at Google (best effort: a failed revoke never blocks the

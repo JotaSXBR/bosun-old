@@ -126,6 +126,38 @@ updates over existing ones.
 Rate limits: People API quotas are per-project — BYOK means each org's
 quota is its own. 429/5xx → retry with backoff.
 
+### Slice 3a — implemented (manual push)
+
+- **Trigger**: only the "Sincronizar agora" button on the Google card
+  (`integrations:manage`, connected account). It queues one
+  `contact-google-sync` job per eligible contact; nothing is sent when the
+  account is connected, nor when a contact is edited (that is slice 3b).
+- **Queue**: `key_strict_fifo`, every job under `singletonKey
+google:<organizationId>` — one Google mutation at a time per org. The
+  handler always completes (a `failed` job would hold the org's key); Google
+  errors are stored as `metadata.google.lastError`, unexpected errors are
+  reported and not retried.
+- **Eligibility**: a WhatsApp `@c.us` phone or an e-mail (`@lid` ids and
+  site-chat visitors without e-mail are skipped). The card counts with the
+  same rule.
+- **Update mask**: a contact Bosun already mirrors is sent with the full
+  field mask, so a field emptied in Bosun is cleared in Google. The first
+  adoption of a pre-existing Google contact (exact phone/e-mail match)
+  sends only the fields Bosun has, so the person's own data is not wiped —
+  it does overwrite the fields Bosun has (name, notes, organization…).
+- **Sanitization**: values with control/bidi characters are dropped and
+  `urls` must be public http(s) without credentials, at the mapping exit,
+  since inbound names and legacy metadata never passed the profile schema.
+- **Idempotency**: `metadata.google.payloadHash` — repeating the button
+  makes no Google call for unchanged contacts. Consequence: a contact
+  deleted in Google is not recreated until it is edited in Bosun.
+- **LGPD**: address and birthday are mirrored (user decision, 2026-10-16);
+  data only leaves after the explicit click, with the account shown in the
+  confirmation.
+- **Known limits (3b)**: sequential enqueue inside one request, summary scan
+  of all contacts on page load, no failed counter in the card, Google write
+  quota (429) can leave contacts in `lastError` on very large bases.
+
 ## Non-goals (later slices)
 
 - **Pull / bidirectional** — import existing Google contacts, remote

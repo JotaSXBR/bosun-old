@@ -1,6 +1,6 @@
 import type { DbExecutor } from "@crm/db";
 import { schema } from "@crm/db";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 
 import type { UpdateContactProfileInput } from "./schemas";
 
@@ -122,6 +122,46 @@ export async function updateContactAvatar(
       updatedAt: new Date(),
     })
     .where(eq(contacts.id, contactId));
+}
+
+/**
+ * Stores the Google mirror state under `metadata.google`. Deliberately leaves
+ * `updated_at` alone — a sync is not a user edit.
+ */
+export async function updateContactGoogleSync(
+  executor: DbExecutor,
+  organizationId: string,
+  contactId: string,
+  google: Record<string, unknown>,
+): Promise<void> {
+  await executor
+    .update(contacts)
+    .set({ metadata: sql`${contacts.metadata} || ${JSON.stringify({ google })}::jsonb` })
+    .where(and(eq(contacts.id, contactId), eq(contacts.organizationId, organizationId)));
+}
+
+/** Keyset page of contacts (ordered by id) for the Google sync scan — call inside withTenant. */
+export async function pageContactsForSync(
+  executor: DbExecutor,
+  organizationId: string,
+  options: { after?: string | undefined; limit: number },
+): Promise<Pick<ContactRow, "id" | "channelUserId" | "displayName" | "metadata">[]> {
+  return executor
+    .select({
+      id: contacts.id,
+      channelUserId: contacts.channelUserId,
+      displayName: contacts.displayName,
+      metadata: contacts.metadata,
+    })
+    .from(contacts)
+    .where(
+      and(
+        eq(contacts.organizationId, organizationId),
+        options.after ? gt(contacts.id, options.after) : undefined,
+      ),
+    )
+    .orderBy(contacts.id)
+    .limit(options.limit);
 }
 
 /**

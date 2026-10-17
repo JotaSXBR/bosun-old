@@ -63,6 +63,21 @@ Never hand-write `tasks/plan.md` — ask the clarifying questions first
 `interview-me` when the ask is underspecified, `idea-refine` to stress-test
 a vague idea, `doubt-driven-development` for high-stakes calls.
 
+**Docs before code — memory is not a source.** Any decision that depends on
+an external library, framework, CLI or provider API must be grounded in
+current docs for the version in use (`package.json`), via
+`source-driven-development` (detect version → fetch → implement → cite):
+Context7 MCP (`resolve-library-id` → `query-docs`) for libraries, the
+official docs fetched over HTTP for provider REST APIs, or the installed
+package's own types/README when Context7 is unavailable. It happens twice:
+(1) **at plan time**, for every decision that shapes scope or architecture —
+recorded in the plan's `## Fontes consultadas` (theme, version, source, date,
+what it confirmed); (2) **at build time**, before the first line of a task
+that touches an external API not yet listed there — add the row first. What
+cannot be found is flagged UNVERIFIED, never assumed. If Context7 fails
+(e.g. invalid key), say so out loud and use the fallback above; never drop
+silently to memory.
+
 ## Commands
 
 `pnpm install` · `dev` · `build` · `verify` (gate: format:check+lint+

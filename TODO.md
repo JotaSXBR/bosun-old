@@ -572,12 +572,19 @@ invitation:create`): lista + convites pendentes com **link copiável
   provedor inbound), Telegram.
 - **P2 — Google**: slice 1/3 **conexão por workspace** ✅ 2026-10-15
   (`external_connections` + OAuth BYOK + card em `/app/settings/channels`;
-  PR #48 mergeado, validar o OAuth real no staging). Slice 2/3 **perfil do
+  PR #48 mergeado; OAuth real validado no staging em 2026-10-16: conexão com o
+  Google concluída, com o aviso esperado de "app não verificado" do modo
+  Testing — a verificação do app fica para o fim do desenvolvimento). Slice 2/3 **perfil do
   contato** ✅ 2026-10-15 (empresa, cargo, endereço, aniversário, sites além
   de e-mail/telefone/notas; ficha do inbox + dialog "Editar" em
-  `/app/contacts`; branch `feat/contact-profile`, aguardando PR). Próximo:
-  slice 3 = job `contact-google-sync` (push contínuo só com conexão ativa +
-  sync inicial em massa ao conectar, People API) — spec em
+  `/app/contacts`; PR #49 mergeado). Slice 3a **motor de sync manual** ✅
+  2026-10-16 (job `contact-google-sync` em fila `key_strict_fifo` por org +
+  botão "Sincronizar agora"; falta o teste manual no staging com o Google
+  real). **Slice 3b** (próxima): gatilho automático nas edições, varredura
+  periódica, `batchCreate/UpdateContacts`, resumo do card em uma consulta
+  SQL, contador/faixa de falhas, enfileirar em job único (hoje sequencial
+  na requisição), `metadata.google` fora do navegador (passar só as chaves
+  do perfil), cliente People em cache no handler. Spec em
   `docs/product/contacts-google-sync.md`. Depois: Calendar, Gmail tools. Em
   aberto: toast de retorno do Google duplicado no dev (checar em build de
   produção). **Antes/dentro da slice 3** (achados do review pré-ship da

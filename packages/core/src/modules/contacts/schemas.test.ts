@@ -51,6 +51,51 @@ describe("updateContactProfileInput — profile fields", () => {
     expect(parse({ birthday }).success).toBe(false);
   });
 
+  it.each([
+    "https://user:pass@acme.test",
+    "https://user@acme.test",
+    "http://localhost:3000",
+    "http://192.168.0.10/x",
+  ])("rejects the unsafe or non-public site %j", (url) => {
+    expect(parse({ urls: [url] }).success).toBe(false);
+  });
+
+  it("accepts a public site with path, query and a different port", () => {
+    expect(parse({ urls: ["https://acme.test:8443/sobre?x=1#topo"] }).success).toBe(true);
+  });
+
+  it.each(["a\u0000b", "a\rb", "a\nb", "a\tb", "a\u202Eb", "a\u2066b", "a\u007Fb"])(
+    "rejects control or bidi characters in single-line fields: %j",
+    (value) => {
+      for (const field of ["displayName", "company", "jobTitle", "phone"]) {
+        expect(parse({ [field]: value }).success, field).toBe(false);
+      }
+    },
+  );
+
+  it("allows normal accents, emoji and RTL letters in single-line fields", () => {
+    expect(
+      parse({ displayName: "José da Conceição 🙂", company: "Ação & Cia", jobTitle: "שלום" })
+        .success,
+    ).toBe(true);
+  });
+
+  it("allows newlines and tabs in address and notes, but not other control or bidi chars", () => {
+    expect(parse({ address: "Rua A\r\nSão Paulo\tSP", notes: "linha 1\nlinha 2" }).success).toBe(
+      true,
+    );
+    for (const value of ["a\u0000b", "a\u202Eb", "a\u2067b", "a\u001Bb"]) {
+      expect(parse({ address: value }).success).toBe(false);
+      expect(parse({ notes: value }).success).toBe(false);
+    }
+  });
+
+  it("explains the rejection in Portuguese", () => {
+    const result = parse({ company: "a\u0000b" });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain("caracteres");
+  });
+
   it("enforces the length limits", () => {
     expect(parse({ company: "a".repeat(121) }).success).toBe(false);
     expect(parse({ jobTitle: "a".repeat(121) }).success).toBe(false);

@@ -13,7 +13,7 @@ import type { ContactListRow, ListContactsInput } from "@crm/core/contacts";
 import { listOrgContacts } from "@crm/core/contacts";
 import { listThreadCards } from "@crm/core/drafts";
 import type { ExternalConnectionPublic } from "@crm/core/external-connections";
-import { getGoogleStatus } from "@crm/core/external-connections";
+import { getGoogleStatus, getGoogleSyncSummary } from "@crm/core/external-connections";
 import type { ChannelConnectionRow } from "@crm/core/integrations";
 import { listChannelConnectionsForTenant } from "@crm/core/integrations";
 import type { KnowledgeEntryRow } from "@crm/core/knowledge";
@@ -109,6 +109,10 @@ export async function getGoogleConnectionStatus(
   ctx: TenantContext,
 ): Promise<ExternalConnectionPublic | null> {
   return getGoogleStatus(getDb(), ctx);
+}
+
+export async function getGoogleContactsSyncSummary(ctx: TenantContext) {
+  return getGoogleSyncSummary(getDb(), ctx);
 }
 
 export async function getOnboardingChecklist(ctx: TenantContext): Promise<OnboardingChecklistRow> {

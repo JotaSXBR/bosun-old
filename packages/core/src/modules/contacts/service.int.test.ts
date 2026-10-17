@@ -319,6 +319,28 @@ describe("contacts service", () => {
     expect(after.metadata.urls).toBeUndefined();
   });
 
+  it("updateContactProfile rejects control chars and credentialed sites, writing nothing", async () => {
+    const agent = ctx(orgA, memberA, "agent");
+    const contact = await createContact(db, agent, {
+      displayName: "Caracteres Ruins",
+      phone: "+5511900009999",
+    });
+    for (const patch of [
+      { company: "Acme\u0000Ltda" },
+      { jobTitle: "Dir\u202Eetora" },
+      { urls: ["https://user:pass@acme.test"] },
+    ]) {
+      await expect(
+        updateContactProfile(db, agent, { contactId: contact.id, notes: "não grava", ...patch }),
+      ).rejects.toThrow();
+    }
+    const after = await getContact(db, agent, contact.id);
+    expect(after.metadata.notes).toBeUndefined();
+    expect(after.metadata.company).toBeUndefined();
+    expect(after.metadata.jobTitle).toBeUndefined();
+    expect(after.metadata.urls).toBeUndefined();
+  });
+
   it("updateContactProfile rejects viewer and cross-tenant write", async () => {
     const contact = await createContact(db, ctx(orgA, memberA, "agent"), {
       displayName: "Protegido",

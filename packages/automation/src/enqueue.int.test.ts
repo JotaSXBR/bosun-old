@@ -6,7 +6,7 @@ import { createDb, sql } from "@crm/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { getBoss, QUEUES, startJobs } from "./boss";
-import { enqueueChannelEventProcessed } from "./enqueue";
+import { enqueueChannelEventProcessed, enqueueContactGoogleSync } from "./enqueue";
 
 let db: Database;
 
@@ -69,6 +69,31 @@ describe("enqueueChannelEventProcessed (pg-boss)", () => {
     expect(rows.length).toBe(1);
     await db.execute(
       sql`delete from pgboss.job where name = ${QUEUES.processChannelEvent} and id = ${rows[0]!.id}`,
+    );
+  });
+});
+
+describe("contact-google-sync queue (pg-boss)", () => {
+  const sync = {
+    organizationId: "418f8b9a-7c3d-7f2e-9a4b-1c2d3e4f5a6b",
+    contactId: "518f8b9a-7c3d-7f2e-9a4b-1c2d3e4f5a6b",
+  };
+
+  it("is a key_strict_fifo queue, so Google mutations run one at a time per organization", async () => {
+    const rows = await db.execute<{ policy: string }>(
+      sql`select policy from pgboss.queue where name = ${QUEUES.contactGoogleSync}`,
+    );
+    expect(rows[0]?.policy).toBe("key_strict_fifo");
+  });
+
+  it("enqueues every job under the organization's singleton key", async () => {
+    expect(await enqueueContactGoogleSync(sync)).toEqual({ skipped: false });
+    const rows = await db.execute<{ singleton_key: string | null }>(
+      sql`select singleton_key from pgboss.job where name = ${QUEUES.contactGoogleSync} and data->>'contactId' = ${sync.contactId}`,
+    );
+    expect(rows.map((row) => row.singleton_key)).toEqual([`google:${sync.organizationId}`]);
+    await db.execute(
+      sql`delete from pgboss.job where name = ${QUEUES.contactGoogleSync} and data->>'contactId' = ${sync.contactId}`,
     );
   });
 });

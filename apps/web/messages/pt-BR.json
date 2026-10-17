@@ -504,7 +504,7 @@
     },
     "google": {
       "title": "Google Contatos",
-      "description": "Conecte a conta Google que vai receber os contatos. Sua organização usa o próprio app OAuth do Google; o envio dos contatos entra na próxima etapa.",
+      "description": "Conecte a conta Google que vai receber os contatos. Sua organização usa o próprio app OAuth do Google; os contatos são enviados quando você clica em Sincronizar agora.",
       "status": {
         "pending": "aguardando autorização",
         "connected": "conectado",
@@ -526,6 +526,11 @@
       "reconnect": "Conectar de novo",
       "verify": "Verificar",
       "verified": "Conexão verificada",
+      "syncNow": "Sincronizar agora",
+      "syncSummary": "{eligible, plural, one {# contato pronto para enviar} other {# contatos prontos para enviar}} · {synced, plural, one {# já sincronizado} other {# já sincronizados}}",
+      "lastSynced": "última sincronização em {date}",
+      "syncConfirm": "Enviar {count, plural, one {# contato} other {# contatos}} para a conta Google {account}? Contatos com o mesmo telefone ou e-mail serão atualizados em vez de duplicados.",
+      "syncQueued": "{count, plural, one {# contato na fila de sincronização} other {# contatos na fila de sincronização}}; o card atualiza conforme o envio avança",
       "disconnect": "Desconectar",
       "disconnectConfirm": "Desconectar o Google? O acesso do Bosun à conta será revogado; os contatos já enviados permanecem na conta Google.",
       "disconnected": "Google desconectado",

@@ -7,6 +7,7 @@ import { brainStaleSweepHandler } from "./tasks/brain-stale-sweep";
 import { channelReconcileHandler } from "./tasks/channel-messages-reconcile";
 import { closeResolvedTicketsHandler } from "./tasks/close-resolved-tickets";
 import { contactAvatarHandler } from "./tasks/contact-avatar";
+import { contactGoogleSyncHandler } from "./tasks/contact-google-sync";
 import { generateDraftHandler } from "./tasks/generate-draft";
 import { observerAnalyzeHandler } from "./tasks/observer-analyze";
 import { observerScanHandler } from "./tasks/observer-scan";
@@ -27,6 +28,7 @@ export const QUEUES = {
   observerScan: "observer-scan",
   contactAvatar: "contact-avatar",
   transcribeAudio: "transcribe-audio",
+  contactGoogleSync: "contact-google-sync",
 } as const;
 
 let boss: PgBoss | undefined;
@@ -82,7 +84,12 @@ async function start(env: ServerEnv): Promise<PgBoss> {
   for (const name of Object.values(QUEUES)) {
     // partition:false — all queues share the job_common partition, so this
     // only inserts a row in pgboss.queue (crm_app needs no CREATE SCHEMA).
-    await instance.createQueue(name);
+    // Google allows one mutation at a time per account, so that queue runs
+    // strictly one job per singletonKey (`google:<organizationId>`).
+    await instance.createQueue(
+      name,
+      name === QUEUES.contactGoogleSync ? { policy: "key_strict_fifo" } : undefined,
+    );
   }
   await instance.work(QUEUES.processChannelEvent, async (jobs) => {
     for (const job of jobs) await processChannelEventHandler(job.data);
@@ -118,6 +125,9 @@ async function start(env: ServerEnv): Promise<PgBoss> {
   });
   await instance.work(QUEUES.transcribeAudio, async (jobs) => {
     for (const job of jobs) await transcribeAudioHandler(job.data);
+  });
+  await instance.work(QUEUES.contactGoogleSync, async (jobs) => {
+    for (const job of jobs) await contactGoogleSyncHandler(job.data);
   });
   // Interval-mode observer sweep — the per-org cadence lives in
   // organization_settings.observer_interval_minutes; the cron tick is just

@@ -13,6 +13,7 @@ import { GoogleOAuthError } from "./google-oauth";
 import {
   completeGoogleAuthorization,
   disconnectGoogle,
+  getGoogleAccessToken,
   getGoogleStatus,
   saveGoogleClient,
   verifyGoogleConnection,
@@ -258,6 +259,93 @@ describe("google connection", () => {
     );
     await expect(disconnectGoogle(db, agentA())).rejects.toBeInstanceOf(AuthorizationError);
     expect(await getGoogleStatus(db, viewerA())).toBeNull();
+  });
+
+  describe("getGoogleAccessToken (system path for the sync job)", () => {
+    const hourAgo = () => new Date(Date.now() - 3_600_000).toISOString();
+
+    async function connect(expiresAt?: string) {
+      const base = fakeOAuth();
+      const oauth = expiresAt
+        ? fakeOAuth({
+            exchangeCode: async (input) => {
+              const result = await base.exchangeCode(input);
+              return { ...result, tokens: { ...result.tokens, expiresAt } };
+            },
+          })
+        : base;
+      const { authUrl } = await saveGoogleClient(db, adminA(), input, oauth);
+      await completeGoogleAuthorization(
+        db,
+        adminA(),
+        { code: "code", state: stateOf(authUrl), redirectUri: REDIRECT },
+        oauth,
+      );
+    }
+
+    it("returns the stored token while it is still valid, without refreshing", async () => {
+      await connect();
+      let refreshes = 0;
+      const oauth = fakeOAuth({
+        refreshAccessToken: () => {
+          refreshes += 1;
+          return Promise.reject(new GoogleOAuthError("should_not_refresh"));
+        },
+      });
+      expect(await getGoogleAccessToken(db, orgA, oauth)).toEqual({ accessToken: "access-1" });
+      expect(refreshes).toBe(0);
+      await disconnectGoogle(db, adminA());
+    });
+
+    it("refreshes an expired token once and persists it", async () => {
+      await connect(hourAgo());
+      let refreshes = 0;
+      const oauth = fakeOAuth({
+        refreshAccessToken: () => {
+          refreshes += 1;
+          return Promise.resolve({
+            accessToken: "access-renewed",
+            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          });
+        },
+      });
+      expect(await getGoogleAccessToken(db, orgA, oauth)).toEqual({
+        accessToken: "access-renewed",
+      });
+      expect(await getGoogleAccessToken(db, orgA, oauth)).toEqual({
+        accessToken: "access-renewed",
+      });
+      expect(refreshes).toBe(1);
+      await disconnectGoogle(db, adminA());
+    });
+
+    it("marks needs_reauth and returns null when Google revoked the grant", async () => {
+      await connect(hourAgo());
+      const revoked = fakeOAuth({
+        refreshAccessToken: () => Promise.reject(new GoogleOAuthError("invalid_grant")),
+      });
+      expect(await getGoogleAccessToken(db, orgA, revoked)).toBeNull();
+      expect((await getGoogleStatus(db, adminA()))?.status).toBe("needs_reauth");
+      expect(await getGoogleAccessToken(db, orgA, fakeOAuth())).toBeNull();
+      await disconnectGoogle(db, adminA());
+    });
+
+    it("keeps the connection and rethrows on a transient refresh failure", async () => {
+      await connect(hourAgo());
+      const flaky = fakeOAuth({
+        refreshAccessToken: () => Promise.reject(new GoogleOAuthError("temporarily_unavailable")),
+      });
+      await expect(getGoogleAccessToken(db, orgA, flaky)).rejects.toBeInstanceOf(GoogleOAuthError);
+      expect((await getGoogleStatus(db, adminA()))?.status).toBe("connected");
+      await disconnectGoogle(db, adminA());
+    });
+
+    it("returns null when there is no connected account (none, or still pending)", async () => {
+      expect(await getGoogleAccessToken(db, orgA, fakeOAuth())).toBeNull();
+      await saveGoogleClient(db, adminA(), input, fakeOAuth());
+      expect(await getGoogleAccessToken(db, orgA, fakeOAuth())).toBeNull();
+      await disconnectGoogle(db, adminA());
+    });
   });
 
   it("keeps each org's connection isolated", async () => {

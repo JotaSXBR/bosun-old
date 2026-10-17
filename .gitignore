@@ -44,3 +44,9 @@ research/agent-skills/
 .codegraph/
 .codegraph-wsl/
 .claude/settings.local.json
+
+# Skills installed by the agent-skills plugin / `npx skills` (symlinks to absolute paths)
+.agents/
+.claude/skills/
+.devin/skills/
+skills-lock.json

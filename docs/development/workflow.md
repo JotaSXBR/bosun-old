@@ -78,6 +78,27 @@ entendimento). Regra:
 - `interview-me` e `spec-driven-development` são as skills para quando a
   ambiguidade é de produto, não de implementação.
 
+## Gate de documentação (plan e build)
+
+Memória não é fonte: o que sabemos de biblioteca ou API pode estar defasado
+(ex.: o `pg-boss` 12 ganhou a política `key_strict_fifo`, que muda o desenho
+de uma fila). A skill `source-driven-development` (detectar versão → buscar →
+implementar → citar) vale **em dois momentos**:
+
+1. **No plan** — toda decisão que molda escopo ou arquitetura e depende de
+   biblioteca/API externa entra na seção `## Fontes consultadas` do
+   `tasks/plan.md` (tema, versão, fonte, data, o que confirmou).
+2. **No build** — antes da primeira linha de uma tarefa que toca uma API
+   externa ainda não listada, a linha nova entra na tabela primeiro.
+
+Fontes, em ordem: Context7 MCP para bibliotecas (`resolve-library-id` →
+`query-docs`); documentação oficial buscada por HTTP para APIs REST de
+provedores (Google, Meta etc.); e, se o Context7 falhar, os tipos/README do
+próprio pacote instalado (`node_modules`). O que não for encontrado é
+marcado como **NÃO VERIFICADO**. Falha de ferramenta (chave inválida do
+Context7, por exemplo) é dita em voz alta; nunca se volta calado para a
+memória.
+
 ## Quando o spec é obrigatório
 
 Todo item entra pelo plan — o que varia é se antes disso um spec
