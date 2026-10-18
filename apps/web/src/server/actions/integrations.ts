@@ -1,6 +1,7 @@
 "use server";
 
 import { enqueueChannelReconcile } from "@crm/automation";
+import type { TenantContext } from "@crm/core";
 import { DomainError } from "@crm/core";
 import type { ConnectionHealth, CreateChannelConnectionInput } from "@crm/core/integrations";
 import {
@@ -57,6 +58,37 @@ function errorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+type PairingState = {
+  status: string;
+  qrCode?: { mimeType: string; data: string };
+  warning?: string;
+};
+
+/** Drives the new connection up; a provider failure only downgrades to a warning. */
+async function pairNewConnection(
+  ctx: TenantContext,
+  conn: { id: string; status: string },
+): Promise<PairingState> {
+  let pairing: PairingState = { status: conn.status };
+  try {
+    const refresh = await refreshConnectionStatus(getDb(), ctx, conn.id);
+    pairing = { status: refresh.status, qrCode: refresh.qrCode };
+    if (refresh.status === "connected") {
+      await enqueueChannelReconcile({
+        organizationId: ctx.organizationId,
+        channelConnectionId: conn.id,
+      });
+    }
+  } catch (connectError) {
+    captureException(connectError, { action: "integrations.create-connect" });
+    pairing = {
+      ...pairing,
+      warning: "Conexão criada, mas o provedor não respondeu — tente Conectar.",
+    };
+  }
+  return pairing;
+}
+
 /**
  * Create + connect in one call: for WAHA the QR code comes back immediately
  * (pairing panel polls connectChannelConnectionAction to keep it fresh).
@@ -69,23 +101,7 @@ export async function createChannelConnectionAction(
   const ctx = await requireTenantContext();
   try {
     const conn = await createChannelConnection(getDb(), ctx, input as CreateChannelConnectionInput);
-    let status = conn.status;
-    let qrCode: { mimeType: string; data: string } | undefined;
-    let warning: string | undefined;
-    try {
-      const refresh = await refreshConnectionStatus(getDb(), ctx, conn.id);
-      status = refresh.status;
-      qrCode = refresh.qrCode;
-      if (refresh.status === "connected") {
-        await enqueueChannelReconcile({
-          organizationId: ctx.organizationId,
-          channelConnectionId: conn.id,
-        });
-      }
-    } catch (connectError) {
-      captureException(connectError, { action: "integrations.create-connect" });
-      warning = "Conexão criada, mas o provedor não respondeu — tente Conectar.";
-    }
+    const { status, qrCode, warning } = await pairNewConnection(ctx, conn);
     try {
       await completeStep(getDb(), ctx, "connect_channel");
     } catch (checklistError) {
@@ -128,7 +144,7 @@ export async function requestPairingCodeAction(
 ): Promise<PairingCodeResult> {
   const ctx = await requireTenantContext();
   try {
-    const { code } = await requestConnectionPairingCode(getDb(), ctx, id, phoneNumber);
+    const { code } = await requestConnectionPairingCode(getDb(), ctx, { id, phoneNumber });
     return { ok: true, code };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Não foi possível gerar o código.") };
@@ -142,7 +158,7 @@ export async function connectionLifecycleAction(
 ): Promise<ConnectActionResult> {
   const ctx = await requireTenantContext();
   try {
-    const result = await connectionLifecycle(getDb(), ctx, id, action);
+    const result = await connectionLifecycle(getDb(), ctx, { id, action });
     revalidatePath("/app/settings/channels");
     return { ok: true, status: result.status };
   } catch (error) {
@@ -178,7 +194,7 @@ export async function updateWidgetConfigAction(
 ): Promise<IntegrationActionResult> {
   const ctx = await requireTenantContext();
   try {
-    await updateWidgetConfig(getDb(), ctx, id, config);
+    await updateWidgetConfig(getDb(), ctx, { id, config });
     revalidatePath("/app/settings/channels");
     return { ok: true };
   } catch (error) {

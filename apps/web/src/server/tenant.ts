@@ -38,6 +38,20 @@ async function resolveTenantContext(
   };
 }
 
+/** The session active organization; with none set, the user first membership is activated. */
+async function ensureActiveOrganization(session: Session): Promise<string> {
+  const active = session.session.activeOrganizationId ?? null;
+  if (active) return active;
+  const memberships = await listUserOrganizations(getDb(), session.user.id);
+  const first = memberships[0];
+  if (!first) redirect("/onboarding");
+  await getAuth().api.setActiveOrganization({
+    headers: await headers(),
+    body: { organizationId: first.organizationId },
+  });
+  return first.organizationId;
+}
+
 /**
  * Builds the TenantContext for the current request. Redirects to /sign-in
  * when unauthenticated and to /onboarding when the user has no organization.
@@ -50,18 +64,7 @@ export const requireTenantContext = cache(async (): Promise<TenantContext> => {
   const session = await requireSession();
   const db = getDb();
 
-  let organizationId = session.session.activeOrganizationId ?? null;
-  if (!organizationId) {
-    const memberships = await listUserOrganizations(db, session.user.id);
-    const first = memberships[0];
-    if (!first) redirect("/onboarding");
-    await getAuth().api.setActiveOrganization({
-      headers: await headers(),
-      body: { organizationId: first.organizationId },
-    });
-    organizationId = first.organizationId;
-  }
-
+  const organizationId = await ensureActiveOrganization(session);
   const ctx = await resolveTenantContext(session, organizationId);
   if (!ctx) redirect("/onboarding");
   // First-run gate: a platform admin without product e-mail configured is

@@ -1,3 +1,4 @@
+import type { TenantContext } from "@crm/core";
 import { Badge } from "@crm/design-system/components/badge";
 import { Card } from "@crm/design-system/components/card";
 import { EmptyState } from "@crm/design-system/templates/empty-state";
@@ -33,6 +34,24 @@ const STATUS_TONES: Record<string, "success" | "warning" | "danger" | "neutral">
   error: "danger",
 };
 
+async function googleSyncView(
+  ctx: TenantContext,
+  google: Awaited<ReturnType<typeof getGoogleConnectionStatus>>,
+) {
+  if (google?.status !== "connected") return null;
+  return {
+    ...(await getGoogleContactsSyncSummary(ctx)),
+    lastSweepAt: google.lastSweepAt?.toISOString() ?? null,
+  };
+}
+
+async function requestOrigin(): Promise<string> {
+  const headerList = await headers();
+  const proto = headerList.get("x-forwarded-proto") ?? "http";
+  const host = headerList.get("x-forwarded-host") ?? headerList.get("host") ?? "localhost:3000";
+  return `${proto}://${host}`;
+}
+
 export default async function IntegrationsPage({
   searchParams,
 }: {
@@ -42,22 +61,13 @@ export default async function IntegrationsPage({
   const ctx = await requireTenantContext();
   const connections = await listChannelConnections(ctx);
   const google = await getGoogleConnectionStatus(ctx);
-  const googleSync =
-    google?.status === "connected"
-      ? {
-          ...(await getGoogleContactsSyncSummary(ctx)),
-          lastSweepAt: google.lastSweepAt?.toISOString() ?? null,
-        }
-      : null;
+  const googleSync = await googleSyncView(ctx, google);
   const { google: googleFlash } = await searchParams;
   // §7.7 of the IA spec: integrations:manage — was `role !== "agent"`,
   // which wrongly included the read-only viewer.
   const canManage = ctx.isPlatformAdmin || hasPermission(ctx.role, { integrations: ["manage"] });
 
-  const headerList = await headers();
-  const proto = headerList.get("x-forwarded-proto") ?? "http";
-  const host = headerList.get("x-forwarded-host") ?? headerList.get("host") ?? "localhost:3000";
-  const origin = `${proto}://${host}`;
+  const origin = await requestOrigin();
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-8">

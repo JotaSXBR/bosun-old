@@ -28,18 +28,14 @@ function safeNext(value: string | null): string | null {
   return value && value.startsWith("/") && !value.startsWith("//") ? value : null;
 }
 
-export default function SignUpPage() {
-  const t = useTranslations("auth.signUp");
-  const tl = useTranslations("auth.layout");
+/** Form state, schema and submit handler of the page. */
+function useSignUp(t: ReturnType<typeof useTranslations>) {
   const tVal = useTranslations("validation");
-  const tc = useTranslations("common");
-  const tAuth = useTranslations("auth");
   const router = useRouter();
   const searchParams = useSearchParams();
   // Invitation links: invitees create the account then return to the invite.
   const next = safeNext(searchParams.get("next"));
   const invitedEmail = searchParams.get("email") ?? "";
-  const [showPassword, setShowPassword] = useState(false);
   const formSchema = z.object({
     name: z.string().min(2, tVal("nameMin")),
     email: z.email(tVal("invalidEmail")),
@@ -64,6 +60,17 @@ export default function SignUpPage() {
     router.push(next ?? "/onboarding");
     router.refresh();
   }
+
+  return { form, next, onSubmit };
+}
+
+export default function SignUpPage() {
+  const t = useTranslations("auth.signUp");
+  const tl = useTranslations("auth.layout");
+  const tc = useTranslations("common");
+  const tAuth = useTranslations("auth");
+  const [showPassword, setShowPassword] = useState(false);
+  const { form, next, onSubmit } = useSignUp(t);
 
   return (
     <AuthLayout

@@ -39,7 +39,7 @@ export async function saveSetupEmailAction(
   };
   const db = getDb();
   try {
-    await setPlatformSetting(db, ctx, "email", values);
+    await setPlatformSetting(db, ctx, { group: "email", input: values });
     if (!(await isProductConfigured(db, "email"))) {
       return {
         ok: false,

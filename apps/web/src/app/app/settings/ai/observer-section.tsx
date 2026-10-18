@@ -7,12 +7,13 @@ import { Input } from "@crm/design-system/components/input";
 import { Label } from "@crm/design-system/components/label";
 import { Select } from "@crm/design-system/components/select";
 import { Switch } from "@crm/design-system/components/switch";
-import { toast } from "@crm/design-system/components/toast";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
+import { useRunAction } from "@/lib/use-run-action";
 import { updateObserverSettingsAction } from "@/server/actions/settings";
+
+const inRange = (minutes: string) => Number(minutes) >= 5 && Number(minutes) <= 120;
 
 /**
  * Observer modes (docs/product/ai-agents.md): off | on_close | interval.
@@ -29,34 +30,26 @@ export function ObserverSection({
   hasCredential: boolean;
 }) {
   const t = useTranslations("settings.ai.observer");
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const { pending, run } = useRunAction();
   const [mode, setMode] = useState<ObserverMode>(settings.aiObserverMode as ObserverMode);
   const [intervalMinutes, setIntervalMinutes] = useState(String(settings.observerIntervalMinutes));
   const [idleMinutes, setIdleMinutes] = useState(String(settings.observerIdleMinutes));
   const [autoDraft, setAutoDraft] = useState(settings.observerAutoDraft);
   const [transcribeAudio, setTranscribeAudio] = useState(settings.aiTranscribeAudio);
 
-  const interval = Number(intervalMinutes);
-  const idle = Number(idleMinutes);
-  const valid = interval >= 5 && interval <= 120 && idle >= 5 && idle <= 120;
+  const valid = inRange(intervalMinutes) && inRange(idleMinutes);
 
   const save = () =>
-    startTransition(async () => {
-      const result = await updateObserverSettingsAction({
+    run(
+      updateObserverSettingsAction({
         aiObserverMode: mode,
-        observerIntervalMinutes: interval,
-        observerIdleMinutes: idle,
+        observerIntervalMinutes: Number(intervalMinutes),
+        observerIdleMinutes: Number(idleMinutes),
         observerAutoDraft: autoDraft,
         aiTranscribeAudio: transcribeAudio,
-      });
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      toast.success(t("saved"));
-      router.refresh();
-    });
+      }),
+      t("saved"),
+    );
 
   return (
     <Card bodyClassName="space-y-4" title={t("title")} subtitle={t("description")}>

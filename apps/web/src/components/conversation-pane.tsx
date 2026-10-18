@@ -1,3 +1,4 @@
+import type { TenantContext } from "@crm/core";
 import { NotFoundError } from "@crm/core";
 import { draftPayloadSchema } from "@crm/core/drafts";
 import type { ConversationDetailRow, MessageWithAuthorRow } from "@crm/core/messaging";
@@ -21,8 +22,8 @@ import { PresenceIndicator } from "@/components/presence-indicator";
 import { JumpAnchor, ThreadSearch } from "@/components/thread-search";
 import { TicketActions } from "@/components/ticket-actions";
 import { TICKET_STATUS } from "@/lib/ticket-status";
+import { findConversation } from "@/server/find-conversation";
 import {
-  getConversation,
   getLastInboundAt,
   hasLlmCredential,
   listMacros,
@@ -71,6 +72,56 @@ function TicketHeader({
   );
 }
 
+type Thread = { rows: MessageWithAuthorRow[]; windowed: boolean };
+
+/**
+ * Jump mode: ?around=<id> swaps the tail for a centered window. A stale or
+ * foreign id falls back to the tail instead of erroring the pane.
+ */
+async function loadMessages(
+  ctx: TenantContext,
+  conversationId: string,
+  around: string | undefined,
+): Promise<Thread> {
+  const tail = () => listMessages(ctx, conversationId).then((rows) => ({ rows, windowed: false }));
+  if (!around) return tail();
+  return listMessagesAround(ctx, conversationId, around)
+    .then((rows) => ({ rows, windowed: true }))
+    .catch((error: unknown) => {
+      if (error instanceof NotFoundError) return tail();
+      throw error;
+    });
+}
+
+function threadAccess(ctx: TenantContext, conversation: ConversationDetailRow) {
+  const isViewer = ctx.role === "viewer";
+  const canWork =
+    !isViewer && conversation.status !== "resolved" && conversation.status !== "closed";
+  // Drafts only render on a workable thread — a pending card on a
+  // resolved ticket would sit disabled forever.
+  const showDrafts = canWork && hasPermission(ctx.role, { messaging: ["write"] });
+  return { isViewer, canWork, showDrafts };
+}
+
+async function loadDrafts(ctx: TenantContext, conversationId: string, showDrafts: boolean) {
+  if (!showDrafts) {
+    return { cards: [] as AgentSuggestionRow[], lastInboundAt: null, hasCredential: false };
+  }
+  const [cards, lastInboundAt, hasCredential] = await Promise.all([
+    listThreadCardsForConversation(ctx, conversationId).catch((error: unknown) => {
+      captureException(error, { action: "listThreadCardsForConversation" });
+      return [];
+    }),
+    getLastInboundAt(ctx, conversationId),
+    hasLlmCredential(ctx),
+  ]);
+  return { cards, lastInboundAt, hasCredential };
+}
+
+/** Live-read key: a new inbound while the thread is open re-fires the read marker. */
+const lastInboundIdOf = (messages: MessageWithAuthorRow[]) =>
+  messages.findLast((m) => m.direction === "inbound")?.id ?? null;
+
 /**
  * Center column of the inbox workbench — ticket header, message thread,
  * ticket actions, AI cards and composer. Self-contained: fetches its own
@@ -90,62 +141,29 @@ export async function ConversationPane({
   const t = await getTranslations("inbox");
   const ts = await getTranslations("ticketStatus");
   const ctx = await requireTenantContext();
-  let conversation;
-  try {
-    conversation = await getConversation(ctx, conversationId);
-  } catch (error) {
-    if (error instanceof NotFoundError) {
-      return (
-        <Card className="min-w-0 flex-1">
-          <EmptyState icon="inbox" title={t("notFound")} />
-        </Card>
-      );
-    }
-    throw error;
+  const conversation = await findConversation(ctx, conversationId);
+  if (!conversation) {
+    return (
+      <Card className="min-w-0 flex-1">
+        <EmptyState icon="inbox" title={t("notFound")} />
+      </Card>
+    );
   }
-  // Jump mode: ?around=<id> swaps the tail for a centered window. A stale or
-  // foreign id falls back to the tail instead of erroring the pane.
-  const messagesPromise: Promise<{ rows: MessageWithAuthorRow[]; windowed: boolean }> = around
-    ? listMessagesAround(ctx, conversationId, around)
-        .then((rows) => ({ rows, windowed: true }))
-        .catch((error: unknown) => {
-          if (error instanceof NotFoundError) {
-            return listMessages(ctx, conversationId).then((rows) => ({ rows, windowed: false }));
-          }
-          throw error;
-        })
-    : listMessages(ctx, conversationId).then((rows) => ({ rows, windowed: false }));
   const [{ rows: messages, windowed }, members, sectors, macros] = await Promise.all([
-    messagesPromise,
+    loadMessages(ctx, conversationId, around),
     listMembers(ctx),
     listSectors(ctx),
     listMacros(ctx),
   ]);
-
-  const isViewer = ctx.role === "viewer";
-  const canWork =
-    !isViewer && conversation.status !== "resolved" && conversation.status !== "closed";
-  // Drafts only render on a workable thread — a pending card on a
-  // resolved ticket would sit disabled forever.
-  const showDrafts = canWork && hasPermission(ctx.role, { messaging: ["write"] });
-  const [cards, lastInboundAt, hasCredential] = showDrafts
-    ? await Promise.all([
-        listThreadCardsForConversation(ctx, conversationId).catch((error: unknown) => {
-          captureException(error, { action: "listThreadCardsForConversation" });
-          return [];
-        }),
-        getLastInboundAt(ctx, conversationId),
-        hasLlmCredential(ctx),
-      ])
-    : [[] as AgentSuggestionRow[], null, false];
-
-  // Live-read key: a new inbound while the thread is open re-fires the
-  // marker — cursor bump + blue tick for a message the agent is watching.
-  const lastInboundKey = messages.findLast((m) => m.direction === "inbound")?.id ?? null;
+  const { isViewer, canWork, showDrafts } = threadAccess(ctx, conversation);
+  const { cards, lastInboundAt, hasCredential } = await loadDrafts(ctx, conversationId, showDrafts);
 
   return (
     <Card bodyClassName="space-y-4" className="min-w-0 flex-1">
-      <ConversationReadMarker conversationId={conversationId} lastInboundKey={lastInboundKey} />
+      <ConversationReadMarker
+        conversationId={conversationId}
+        lastInboundKey={lastInboundIdOf(messages)}
+      />
       <TicketHeader conversation={conversation} t={t} ts={ts} />
 
       {conversation.precededById && (

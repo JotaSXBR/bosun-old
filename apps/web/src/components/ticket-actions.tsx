@@ -15,11 +15,10 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@crm/design-system/components/dropdown-menu";
-import { toast } from "@crm/design-system/components/toast";
-import { useRouter } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 
+import { useRunAction } from "@/lib/use-run-action";
 import {
   pickupConversationAction,
   reopenTicketAction,
@@ -94,23 +93,12 @@ export function TicketActions({
   isViewer: boolean;
 }) {
   const t = useTranslations("tickets");
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const { pending, run } = useRunAction();
 
   // Work actions belong to the assignee; another agent's path is Transfer.
   const ownsTicket = conversation.assigneeId === null || conversation.assigneeId === userId;
   // Viewers can never work a ticket — no point offering them as targets.
   const agents = members.filter((m) => m.role !== "viewer");
-
-  const run = (action: Promise<ActionResult>) =>
-    startTransition(async () => {
-      const result = await action;
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      router.refresh();
-    });
 
   const conversationId = conversation.id;
   const {

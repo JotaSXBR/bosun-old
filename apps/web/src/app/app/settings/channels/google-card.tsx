@@ -166,7 +166,6 @@ export function GoogleCard({
   }
 
   const connected = connection?.status === "connected";
-  const errorKey = connection?.lastError ? `errors.${connection.lastError}` : null;
 
   return (
     <Card title={t("title")} subtitle={t("description")}>
@@ -190,7 +189,9 @@ export function GoogleCard({
         )}
         {connection?.lastError && (
           <p className="text-danger text-sm">
-            {errorKey && t.has(errorKey) ? t(errorKey) : connection.lastError}
+            {t.has(`errors.${connection.lastError}`)
+              ? t(`errors.${connection.lastError}`)
+              : connection.lastError}
           </p>
         )}
 

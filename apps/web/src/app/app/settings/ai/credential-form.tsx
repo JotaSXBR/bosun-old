@@ -4,11 +4,10 @@ import { Button } from "@crm/design-system/components/button";
 import { Input } from "@crm/design-system/components/input";
 import { Label } from "@crm/design-system/components/label";
 import { Select } from "@crm/design-system/components/select";
-import { toast } from "@crm/design-system/components/toast";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
+import { useRunAction } from "@/lib/use-run-action";
 import { createLlmCredentialAction } from "@/server/actions/ai";
 
 type Provider = "openai" | "anthropic" | "openrouter";
@@ -16,8 +15,7 @@ type Provider = "openai" | "anthropic" | "openrouter";
 /** Inline create form — the API key is write-only and never re-rendered. */
 export function CredentialCreateForm() {
   const t = useTranslations("settings.ai.credentials");
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const { pending, run } = useRunAction();
   const [provider, setProvider] = useState<Provider>("openrouter");
   const [apiKey, setApiKey] = useState("");
   const [label, setLabel] = useState("");
@@ -26,25 +24,22 @@ export function CredentialCreateForm() {
   const [zdr, setZdr] = useState(false);
 
   const submit = () =>
-    startTransition(async () => {
-      const result = await createLlmCredentialAction({
+    run(
+      createLlmCredentialAction({
         provider,
         apiKey,
         label: label.trim() || undefined,
         model: model.trim(),
         priority: Number(priority) || 0,
         zdr,
-      });
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      toast.success(t("created"));
-      setApiKey("");
-      setLabel("");
-      setModel("");
-      router.refresh();
-    });
+      }),
+      t("created"),
+      () => {
+        setApiKey("");
+        setLabel("");
+        setModel("");
+      },
+    );
 
   return (
     <div className="space-y-3 border-t pt-4" data-testid="credential-form">

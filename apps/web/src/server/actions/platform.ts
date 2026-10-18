@@ -38,7 +38,7 @@ export async function updatePlatformSettingAction(input: {
   const ctx = await requireTenantContext();
   try {
     const parsed = inputSchema.parse(input);
-    await setPlatformSetting(getDb(), ctx, parsed.group, parsed.values);
+    await setPlatformSetting(getDb(), ctx, { group: parsed.group, input: parsed.values });
     revalidatePath("/app/platform");
     return { ok: true };
   } catch (error) {

@@ -28,18 +28,14 @@ function safeNext(value: string | null): string | null {
   return value && value.startsWith("/") && !value.startsWith("//") ? value : null;
 }
 
-export default function SignInPage() {
-  const t = useTranslations("auth.signIn");
-  const tl = useTranslations("auth.layout");
+/** Form state, schema and submit handler of the page. */
+function useSignIn(t: ReturnType<typeof useTranslations>) {
   const tVal = useTranslations("validation");
-  const tc = useTranslations("common");
-  const tAuth = useTranslations("auth");
   const router = useRouter();
   const searchParams = useSearchParams();
   // Invitation links land on /accept-invitation — honor `next` so sign-in
   // returns the invitee to the pending invite. Internal paths only.
   const next = safeNext(searchParams.get("next"));
-  const [showPassword, setShowPassword] = useState(false);
   const formSchema = z.object({
     email: z.email(tVal("invalidEmail")),
     password: z.string().min(8, tVal("passwordMin")),
@@ -61,6 +57,17 @@ export default function SignInPage() {
     router.push(next ?? "/app");
     router.refresh();
   }
+
+  return { form, next, onSubmit };
+}
+
+export default function SignInPage() {
+  const t = useTranslations("auth.signIn");
+  const tl = useTranslations("auth.layout");
+  const tc = useTranslations("common");
+  const tAuth = useTranslations("auth");
+  const [showPassword, setShowPassword] = useState(false);
+  const { form, next, onSubmit } = useSignIn(t);
 
   return (
     <AuthLayout

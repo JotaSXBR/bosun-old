@@ -7,12 +7,10 @@ import { Button } from "@crm/design-system/components/button";
 import { Card } from "@crm/design-system/components/card";
 import { Input } from "@crm/design-system/components/input";
 import { Textarea } from "@crm/design-system/components/textarea";
-import { toast } from "@crm/design-system/components/toast";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
-import type { MacroActionResult } from "@/server/actions/macros";
+import { useRunAction } from "@/lib/use-run-action";
 import {
   approveMacroAction,
   createMacroAction,
@@ -22,7 +20,18 @@ import {
   updateMacroAction,
 } from "@/server/actions/macros";
 
-type Run = (action: Promise<MacroActionResult>, success?: string, onSuccess?: () => void) => void;
+/** Inline-edit state of the macro list: which row is open and its draft fields. */
+function useMacroEdit() {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const startEdit = (m: MacroRow) => {
+    setEditingId(m.id);
+    setEditName(m.name);
+    setEditContent(m.content);
+  };
+  return { editingId, setEditingId, editName, setEditName, editContent, setEditContent, startEdit };
+}
 
 export function MacrosManager({
   macros,
@@ -40,26 +49,12 @@ export function MacrosManager({
   currentUserId: string;
 }) {
   const t = useTranslations("settings.macros");
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const { pending: isPending, run } = useRunAction();
   const [name, setName] = useState("");
   const [content, setContent] = useState("");
   const [rationale, setRationale] = useState("");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editContent, setEditContent] = useState("");
-
-  const run: Run = (action, success, onSuccess) =>
-    startTransition(async () => {
-      const result = await action;
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      if (success) toast.success(success);
-      onSuccess?.();
-      router.refresh();
-    });
+  const { editingId, setEditingId, editName, setEditName, editContent, setEditContent, startEdit } =
+    useMacroEdit();
 
   const submitNew = () => {
     const trimmedName = name.trim().replace(/^\/+/, "");
@@ -87,12 +82,6 @@ export function MacrosManager({
         },
       );
     }
-  };
-
-  const startEdit = (m: MacroRow) => {
-    setEditingId(m.id);
-    setEditName(m.name);
-    setEditContent(m.content);
   };
 
   return (

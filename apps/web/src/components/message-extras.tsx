@@ -22,6 +22,14 @@ const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as co
 
 type TargetProps = { conversationId: string; messageId: string };
 
+/** Edit / delete-confirm / draft-text state shared by both menu flavors. */
+function useMessageMenuState(currentText: string) {
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [draft, setDraft] = useState(currentText);
+  return { editing, setEditing, confirming, setConfirming, draft, setDraft };
+}
+
 /**
  * Per-message "⋯" menu: quick reactions, edit (own outbound text, ~15min
  * window enforced server-side) and delete-for-everyone.
@@ -46,9 +54,8 @@ export function MessageMenu({
   const tc = useTranslations("common");
   const { pending, run } = useAction();
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [draft, setDraft] = useState(currentText);
+  const { editing, setEditing, confirming, setConfirming, draft, setDraft } =
+    useMessageMenuState(currentText);
 
   if (!canReact && !canEdit && !canDelete && !replyTarget) return null;
 
@@ -260,6 +267,29 @@ function MessageMenuPanel(props: MenuItemsProps) {
   );
 }
 
+/** Click-away outside the panel, Escape and scroll dismiss it; clicks inside must not. */
+function useDismissOnOutside(active: boolean, close: () => void) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!active) return;
+    const onClick = (e: MouseEvent) => {
+      if (!panelRef.current?.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("click", onClick);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [active, close]);
+  return panelRef;
+}
+
 /** Only one floating context menu at a time — opening closes the previous. */
 let closeCurrentContextMenu: (() => void) | null = null;
 
@@ -290,10 +320,8 @@ export function MessageContextMenu({
   const tc = useTranslations("common");
   const { pending, run } = useAction();
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [draft, setDraft] = useState(currentText);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const { editing, setEditing, confirming, setConfirming, draft, setDraft } =
+    useMessageMenuState(currentText);
 
   const enabled = canReact || canEdit || canDelete || !!replyTarget;
 
@@ -304,25 +332,7 @@ export function MessageContextMenu({
     if (closeCurrentContextMenu) closeCurrentContextMenu = null;
   };
 
-  // Click-away outside the panel, Escape and scroll dismiss it. Clicks
-  // inside (Editar → form, Excluir → confirm) must not close the menu.
-  useEffect(() => {
-    if (!pos) return;
-    const onClick = (e: MouseEvent) => {
-      if (!panelRef.current?.contains(e.target as Node)) close();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("click", onClick);
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", close, true);
-    return () => {
-      document.removeEventListener("click", onClick);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, true);
-    };
-  }, [pos]);
+  const panelRef = useDismissOnOutside(pos !== null, close);
 
   const open = (e: React.MouseEvent) => {
     if (!enabled) return;

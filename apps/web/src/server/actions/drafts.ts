@@ -83,7 +83,7 @@ export async function approveDraftAction(input: ReviewDraftInput): Promise<Draft
   const ctx = await requireTenantContext();
   try {
     const parsed = reviewDraftInput.parse(input);
-    const row = await approveDraft(getDb(), ctx, parsed.suggestionId);
+    const row = await approveDraft(getDb(), ctx, { suggestionId: parsed.suggestionId });
     revalidatePath("/app/inbox");
     return { ok: true, id: row.id };
   } catch (error) {

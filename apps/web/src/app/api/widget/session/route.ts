@@ -1,11 +1,16 @@
-import { NotFoundError } from "@crm/core";
 import { createWidgetSession, widgetPreFormInput } from "@crm/core/messaging";
 import { getDb } from "@crm/db";
-import { captureException } from "@crm/observability";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { clientIp, corsJson, corsOptions, rateLimit } from "../../../../lib/widget-http";
+import {
+  clientIp,
+  corsJson,
+  corsOptions,
+  parseJsonBody,
+  rateLimit,
+  widgetErrorResponse,
+} from "../../../../lib/widget-http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,24 +32,12 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (!rateLimit(`widget:session:${clientIp(request)}`, 10, 60_000)) {
     return corsJson({ ok: false, error: "rate_limited" }, { status: 429 });
   }
-  let body: unknown;
+  const input = await parseJsonBody(request, sessionCreateInput);
+  if ("response" in input) return input.response;
   try {
-    body = await request.json();
-  } catch {
-    return corsJson({ ok: false, error: "invalid_json" }, { status: 400 });
-  }
-  const parsed = sessionCreateInput.safeParse(body);
-  if (!parsed.success) {
-    return corsJson({ ok: false, error: "invalid_input" }, { status: 400 });
-  }
-  try {
-    const session = await createWidgetSession(getDb(), parsed.data.connectionToken, parsed.data);
+    const session = await createWidgetSession(getDb(), input.data.connectionToken, input.data);
     return corsJson({ ok: true, ...session });
   } catch (error) {
-    if (error instanceof NotFoundError) {
-      return corsJson({ ok: false, error: "unknown_connection" }, { status: 404 });
-    }
-    captureException(error, { route: "widget.session" });
-    return corsJson({ ok: false, error: "internal" }, { status: 500 });
+    return widgetErrorResponse(error, "widget.session", "unknown_connection");
   }
 }

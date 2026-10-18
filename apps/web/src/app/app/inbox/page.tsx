@@ -1,3 +1,4 @@
+import type { TenantContext } from "@crm/core";
 import type { ConversationListRow, ConversationView } from "@crm/core/messaging";
 import { cn } from "@crm/design-system/lib/utils";
 import { EmptyState } from "@crm/design-system/templates/empty-state";
@@ -109,24 +110,13 @@ function sectionize(opts: {
   );
 }
 
-export default async function InboxPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | undefined>>;
-}) {
-  const t = await getTranslations("inbox");
-  const ts = await getTranslations("ticketStatus");
-  const format = await getFormatter();
-  const ctx = await requireTenantContext();
-  const sp = await searchParams;
+function inboxParams(sp: Record<string, string | undefined>) {
   const view: ConversationView = VIEWS.some((v) => v === sp.view)
     ? (sp.view as ConversationView)
     : "queue";
   const selectedId = sp.c && UUID_RE.test(sp.c) ? sp.c : undefined;
   // B1 jump: `around` re-renders the thread centered on a search hit.
   const aroundId = sp.around && UUID_RE.test(sp.around) ? sp.around : undefined;
-  const canWrite = hasPermission(ctx.role, { messaging: ["write"] });
-
   const params = {
     view,
     c: selectedId,
@@ -135,12 +125,16 @@ export default async function InboxPage({
     sector: sp.sector && UUID_RE.test(sp.sector) ? sp.sector : undefined,
     awaiting: sp.awaiting === "1" ? "1" : undefined,
   };
-  // Row links append their own `c` — the preserved query carries filters only.
-  const query = queryString({ ...params, c: undefined });
+  return { view, selectedId, aroundId, params };
+}
 
+async function loadInboxLists(
+  ctx: TenantContext,
+  params: ReturnType<typeof inboxParams>["params"],
+) {
   const [rows, counts, channels, sectors, wahaConnections] = await Promise.all([
     listConversations(ctx, {
-      view,
+      view: params.view,
       search: params.q,
       channelConnectionId: params.conn,
       sectorId: params.sector,
@@ -151,20 +145,44 @@ export default async function InboxPage({
     listSectors(ctx),
     listWahaConnections(ctx),
   ]);
+  return { rows, counts, channels, sectors, wahaConnections };
+}
 
-  // Discriminating markers (spec docs/product/inbox.md): a badge only renders
-  // when it tells rows apart — channel if >1 connected, assignee when the
-  // list mixes owners (never inside Minhas or the unassigned Fila).
+type InboxLists = Awaited<ReturnType<typeof loadInboxLists>>;
+
+/** Queue rows plus the discriminating markers (spec docs/product/inbox.md). */
+function buildInboxRows(lists: InboxLists, deps: Pick<MapDeps, "view" | "ts" | "t" | "format">) {
+  const { rows, channels, sectors } = lists;
+  // A badge only renders when it tells rows apart — channel if >1 connected,
+  // assignee when the list mixes owners (never inside Minhas or the unassigned Fila).
   const showChannel = channels.length > 1;
   const channelName = (id: string) => channels.find((c) => c.id === id)?.name ?? null;
   const distinctOwners = new Set(rows.map((r) => r.assigneeId).filter(Boolean)).size;
-  const showAssignee = view !== "mine" && view !== "queue" && distinctOwners > 1;
-
-  const mapped = rows.map((row) =>
-    toQueueRow(row, { view, showChannel, channelName, ts, t, format }),
-  );
+  const showAssignee = deps.view !== "mine" && deps.view !== "queue" && distinctOwners > 1;
+  const mapped = rows.map((row) => toQueueRow(row, { ...deps, showChannel, channelName }));
   const display =
-    view === "queue" ? sectionize({ mapped, rows, sectors, entryLabel: t("entryQueue") }) : mapped;
+    deps.view === "queue"
+      ? sectionize({ mapped, rows, sectors, entryLabel: deps.t("entryQueue") })
+      : mapped;
+  return { display, showChannel, showAssignee };
+}
+
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  const t = await getTranslations("inbox");
+  const ts = await getTranslations("ticketStatus");
+  const format = await getFormatter();
+  const ctx = await requireTenantContext();
+  const { view, selectedId, aroundId, params } = inboxParams(await searchParams);
+  // Row links append their own `c` — the preserved query carries filters only.
+  const query = queryString({ ...params, c: undefined });
+
+  const lists = await loadInboxLists(ctx, params);
+  const { counts, channels, sectors, wahaConnections } = lists;
+  const { display, showChannel, showAssignee } = buildInboxRows(lists, { view, ts, t, format });
 
   return (
     <main className="h-workbench flex" data-testid="inbox-workbench">
@@ -179,7 +197,9 @@ export default async function InboxPage({
           <h1 className="font-display tracking-card text-ink-strong text-lg font-medium">
             {t("title")}
           </h1>
-          {canWrite && <NewConversationButton connections={wahaConnections} />}
+          {hasPermission(ctx.role, { messaging: ["write"] }) && (
+            <NewConversationButton connections={wahaConnections} />
+          )}
         </div>
 
         <nav className="flex gap-1 overflow-x-auto border-b px-2" aria-label={t("viewsAria")}>

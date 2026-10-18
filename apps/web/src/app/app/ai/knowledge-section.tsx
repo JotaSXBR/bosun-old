@@ -4,12 +4,10 @@ import type { KnowledgeEntryRow } from "@crm/core/knowledge";
 import { Badge } from "@crm/design-system/components/badge";
 import { Button } from "@crm/design-system/components/button";
 import { Card } from "@crm/design-system/components/card";
-import { toast } from "@crm/design-system/components/toast";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
-import type { AiActionResult } from "@/server/actions/ai";
+import { useRunAction } from "@/lib/use-run-action";
 import {
   createKnowledgeEntryAction,
   deleteKnowledgeEntryAction,
@@ -18,35 +16,13 @@ import {
 
 import { KnowledgeFormDialog } from "./knowledge-form-dialog";
 
-type Run = (action: Promise<AiActionResult>, success?: string, onSuccess?: () => void) => void;
-
-export function KnowledgeSection({
-  entries,
-  canManage,
-}: {
-  entries: KnowledgeEntryRow[];
-  canManage: boolean;
-}) {
-  const t = useTranslations("settings.ai.knowledge");
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+/** Dialog draft: which entry is being edited (if any) and its fields. */
+function useKnowledgeDraft() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<KnowledgeEntryRow | null>(null);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [status, setStatus] = useState<"active" | "archived">("active");
-
-  const run: Run = (action, success, onSuccess) =>
-    startTransition(async () => {
-      const result = await action;
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      if (success) toast.success(success);
-      onSuccess?.();
-      router.refresh();
-    });
 
   const openCreate = () => {
     setEditing(null);
@@ -62,6 +38,43 @@ export function KnowledgeSection({
     setStatus(entry.status === "archived" ? "archived" : "active");
     setOpen(true);
   };
+  return {
+    open,
+    setOpen,
+    editing,
+    title,
+    setTitle,
+    content,
+    setContent,
+    status,
+    setStatus,
+    openCreate,
+    openEdit,
+  };
+}
+
+export function KnowledgeSection({
+  entries,
+  canManage,
+}: {
+  entries: KnowledgeEntryRow[];
+  canManage: boolean;
+}) {
+  const t = useTranslations("settings.ai.knowledge");
+  const { pending, run } = useRunAction();
+  const {
+    open,
+    setOpen,
+    editing,
+    title,
+    setTitle,
+    content,
+    setContent,
+    status,
+    setStatus,
+    openCreate,
+    openEdit,
+  } = useKnowledgeDraft();
 
   const submit = () => {
     const values = { title: title.trim(), content: content.trim(), status };

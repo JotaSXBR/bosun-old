@@ -200,6 +200,22 @@ function FieldInput({
   );
 }
 
+/** Reads every field of the group from the form into a nested values object. */
+function collectValues(fields: FieldDef[], fd: FormData): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (field.kind === "checkbox") {
+      setPath(values, field.path, fd.has(field.path));
+    } else if (field.kind === "number") {
+      const raw = fdString(fd, field.path);
+      setPath(values, field.path, raw === "" ? "" : Number(raw));
+    } else {
+      setPath(values, field.path, fdString(fd, field.path));
+    }
+  }
+  return values;
+}
+
 /** One platform settings group — rendered at /app/platform/<group> (platform_admin only). */
 export function PlatformGroupCard({ summary }: { summary: PlatformSettingSummary }) {
   const t = useTranslations("settings");
@@ -209,17 +225,7 @@ export function PlatformGroupCard({ summary }: { summary: PlatformSettingSummary
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
-    const values: Record<string, unknown> = {};
-    for (const field of def.fields) {
-      if (field.kind === "checkbox") {
-        setPath(values, field.path, fd.has(field.path));
-      } else if (field.kind === "number") {
-        const raw = fdString(fd, field.path);
-        setPath(values, field.path, raw === "" ? "" : Number(raw));
-      } else {
-        setPath(values, field.path, fdString(fd, field.path));
-      }
-    }
+    const values = collectValues(def.fields, fd);
     const result = await updatePlatformSettingAction({ group: summary.group, values });
     if (result.ok) {
       toast.success(t("platform.saved", { group: def.title }));

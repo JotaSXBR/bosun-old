@@ -11,6 +11,7 @@ import { useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
 
 import { ContactSelect } from "@/components/contact-select";
+import { useOnOpen } from "@/lib/use-on-open";
 import { createContactAction, startOutboundConversationAction } from "@/server/actions/contacts";
 import type { WahaConnectionPick } from "@/server/services";
 
@@ -47,11 +48,7 @@ export function NewContactDialog({
     email: "",
   });
   const [form, setFormState] = useState<ContactFormState>(initialForm);
-  const [wasOpen, setWasOpen] = useState(open);
-  if (wasOpen !== open) {
-    setWasOpen(open);
-    if (open) setFormState(initialForm());
-  }
+  useOnOpen(open, () => setFormState(initialForm()));
   const [pending, startTransition] = useTransition();
   const setForm = (patch: Partial<ContactFormState>) =>
     setFormState((prev) => ({ ...prev, ...patch }));
@@ -148,16 +145,12 @@ export function NewConversationDialog({
   const [contactId, setContactId] = useState("");
   const [connectionId, setConnectionId] = useState("");
   const [contactBump, setContactBump] = useState(0);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createName, setCreateName] = useState("");
-  const [wasOpen, setWasOpen] = useState(open);
-  if (wasOpen !== open) {
-    setWasOpen(open);
-    if (open) {
-      setContactId(contact?.id ?? "");
-      setConnectionId(connections[0]?.id ?? "");
-    }
-  }
+  // Name typed in the picker when "create" was clicked; null = the inline dialog is closed.
+  const [createName, setCreateName] = useState<string | null>(null);
+  useOnOpen(open, () => {
+    setContactId(contact?.id ?? "");
+    setConnectionId(connections[0]?.id ?? "");
+  });
   const [pending, startTransition] = useTransition();
 
   function submit() {
@@ -176,8 +169,6 @@ export function NewConversationDialog({
     });
   }
 
-  const canSubmit = contactId && connectionId && !pending;
-
   return (
     <>
       <Dialog
@@ -185,7 +176,11 @@ export function NewConversationDialog({
         onClose={() => onOpenChange(false)}
         title={t("newConversation")}
         footer={
-          <Button variant="primary" onClick={submit} disabled={!canSubmit}>
+          <Button
+            variant="primary"
+            onClick={submit}
+            disabled={!contactId || !connectionId || pending}
+          >
             {t("startConversation")}
           </Button>
         }
@@ -204,10 +199,7 @@ export function NewConversationDialog({
                 onChange={(id) => setContactId(id)}
                 refreshKey={contactBump}
                 onlyWhatsApp
-                onCreateClick={(query) => {
-                  setCreateName(query);
-                  setCreateOpen(true);
-                }}
+                onCreateClick={setCreateName}
               />
             </div>
           )}
@@ -227,9 +219,9 @@ export function NewConversationDialog({
         </div>
       </Dialog>
       <NewContactDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        initialName={createName}
+        open={createName !== null}
+        onOpenChange={(next) => !next && setCreateName(null)}
+        initialName={createName ?? ""}
         onCreated={(id) => {
           setContactId(id);
           setContactBump((b) => b + 1);

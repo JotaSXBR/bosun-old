@@ -51,12 +51,28 @@ function errorMessage(error: unknown, fallback: string): string {
 export async function sendChannelMessageAction(input: SendChannelInput): Promise<ChatActionResult> {
   const ctx = await requireTenantContext();
   try {
-    const message = await sendChannelMessage(getDb(), ctx, input);
+    const message = await sendChannelMessage(getDb(), ctx, { input });
     revalidatePath("/app/inbox");
     return { ok: true, id: message.id };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Não foi possível enviar a mensagem.") };
   }
+}
+
+/** Stores the file under the tenant key and returns it with the signed GET URL the provider downloads. */
+async function uploadOutbound(organizationId: string, file: File, mime: string) {
+  const storage = getStorage();
+  const storageKey = tenantObjectKey(organizationId, "outbound", crypto.randomUUID());
+  await storage.upload({
+    key: storageKey,
+    body: new Uint8Array(await file.arrayBuffer()),
+    contentType: mime,
+  });
+  const url = await storage.getSignedUrl(storageKey, {
+    method: "get",
+    expiresInSeconds: SIGNED_URL_TTL_SECONDS,
+  });
+  return { storageKey, url };
 }
 
 /**
@@ -70,32 +86,23 @@ export async function sendMediaMessageAction(formData: FormData): Promise<ChatAc
   try {
     const { input, file } = parseMediaForm(formData);
     const mime = file.type || "application/octet-stream";
-
-    const storage = getStorage();
-    const storageKey = tenantObjectKey(ctx.organizationId, "outbound", crypto.randomUUID());
-    await storage.upload({
-      key: storageKey,
-      body: new Uint8Array(await file.arrayBuffer()),
-      contentType: mime,
-    });
-    const url = await storage.getSignedUrl(storageKey, {
-      method: "get",
-      expiresInSeconds: SIGNED_URL_TTL_SECONDS,
-    });
+    const { storageKey, url } = await uploadOutbound(ctx.organizationId, file, mime);
 
     const message = await sendChannelMessage(getDb(), ctx, {
-      conversationId: input.conversationId,
-      content: {
-        type: "media",
-        mediaKind: mediaKindOf(mime, input.voiceNote),
-        url,
-        mimeType: mime,
-        ...(input.caption ? { caption: input.caption } : {}),
-        filename: file.name,
-        ...(input.voiceNote ? { voiceNote: true } : {}),
-        storageKey,
+      input: {
+        conversationId: input.conversationId,
+        content: {
+          type: "media",
+          mediaKind: mediaKindOf(mime, input.voiceNote),
+          url,
+          mimeType: mime,
+          ...(input.caption ? { caption: input.caption } : {}),
+          filename: file.name,
+          ...(input.voiceNote ? { voiceNote: true } : {}),
+          storageKey,
+        },
+        ...(input.replyToId ? { replyToId: input.replyToId } : {}),
       },
-      ...(input.replyToId ? { replyToId: input.replyToId } : {}),
     });
     revalidatePath("/app/inbox");
     return { ok: true, id: message.id };
@@ -113,12 +120,15 @@ export async function resendMessageAction(input: MessageActionInput): Promise<Ch
   const ctx = await requireTenantContext();
   try {
     const storage = getStorage();
-    const message = await resendFailedMessage(getDb(), ctx, input, {
-      signUrl: (storageKey) =>
-        storage.getSignedUrl(storageKey, {
-          method: "get",
-          expiresInSeconds: SIGNED_URL_TTL_SECONDS,
-        }),
+    const message = await resendFailedMessage(getDb(), ctx, {
+      input,
+      deps: {
+        signUrl: (storageKey) =>
+          storage.getSignedUrl(storageKey, {
+            method: "get",
+            expiresInSeconds: SIGNED_URL_TTL_SECONDS,
+          }),
+      },
     });
     revalidatePath("/app/inbox");
     return { ok: true, id: message.id };
@@ -130,7 +140,7 @@ export async function resendMessageAction(input: MessageActionInput): Promise<Ch
 export async function reactToMessageAction(input: ReactMessageInput): Promise<ChatActionResult> {
   const ctx = await requireTenantContext();
   try {
-    await reactToMessage(getDb(), ctx, input);
+    await reactToMessage(getDb(), ctx, { input });
     return { ok: true };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Não foi possível reagir.") };
@@ -140,7 +150,7 @@ export async function reactToMessageAction(input: ReactMessageInput): Promise<Ch
 export async function editMessageAction(input: EditMessageInput): Promise<ChatActionResult> {
   const ctx = await requireTenantContext();
   try {
-    await editMessageContent(getDb(), ctx, input);
+    await editMessageContent(getDb(), ctx, { input });
     revalidatePath("/app/inbox");
     return { ok: true };
   } catch (error) {
@@ -151,7 +161,7 @@ export async function editMessageAction(input: EditMessageInput): Promise<ChatAc
 export async function deleteMessageAction(input: MessageActionInput): Promise<ChatActionResult> {
   const ctx = await requireTenantContext();
   try {
-    await deleteMessageContent(getDb(), ctx, input);
+    await deleteMessageContent(getDb(), ctx, { input });
     revalidatePath("/app/inbox");
     return { ok: true };
   } catch (error) {
@@ -163,7 +173,7 @@ export async function deleteMessageAction(input: MessageActionInput): Promise<Ch
 export async function sendChatPresenceAction(input: PresenceInput): Promise<ChatActionResult> {
   const ctx = await requireTenantContext();
   try {
-    await sendChatPresence(getDb(), ctx, input);
+    await sendChatPresence(getDb(), ctx, { input });
     return { ok: true };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "presence") };
@@ -176,7 +186,7 @@ export async function subscribeChatPresenceAction(
 ): Promise<ChatActionResult> {
   const ctx = await requireTenantContext();
   try {
-    await subscribeChatPresence(getDb(), ctx, input);
+    await subscribeChatPresence(getDb(), ctx, { input });
     return { ok: true };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "subscribe") };

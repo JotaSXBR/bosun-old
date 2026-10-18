@@ -69,6 +69,13 @@ function PaginationNav({
   );
 }
 
+function pagingOf(params: { q?: string; page?: string }) {
+  return {
+    query: params.q?.trim(),
+    page: Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1),
+  };
+}
+
 export default async function ContactsPage({
   searchParams,
 }: {
@@ -77,9 +84,7 @@ export default async function ContactsPage({
   const t = await getTranslations("contacts");
   const format = await getFormatter();
   const ctx = await requireTenantContext();
-  const { q, page: pageParam } = await searchParams;
-  const query = q?.trim();
-  const page = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
+  const { query, page } = pagingOf(await searchParams);
   const canWrite = hasPermission(ctx.role, { messaging: ["write"] });
   const [rows, connections] = await Promise.all([
     // One extra row answers hasNextPage without a separate COUNT.

@@ -11,11 +11,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { searchMessagesAction } from "@/server/actions/messaging";
 
-export function ThreadSearch({ conversationId }: { conversationId: string }) {
-  const t = useTranslations("inbox");
-  const format = useFormatter();
-  const router = useRouter();
-  const searchParams = useSearchParams();
+/** Debounced search plus open/close state of the hit dropdown (closed on outside click). */
+function useThreadSearch(conversationId: string) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<MessageSearchHit[] | null>(null);
   const [open, setOpen] = useState(false);
@@ -46,6 +43,15 @@ export function ThreadSearch({ conversationId }: { conversationId: string }) {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
+  return { query, setQuery, hits, setHits, open, setOpen, boxRef };
+}
+
+export function ThreadSearch({ conversationId }: { conversationId: string }) {
+  const t = useTranslations("inbox");
+  const format = useFormatter();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { query, setQuery, hits, setHits, open, setOpen, boxRef } = useThreadSearch(conversationId);
 
   const jumpTo = (hit: MessageSearchHit) => {
     const params = new URLSearchParams(searchParams.toString());

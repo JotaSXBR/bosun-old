@@ -1,4 +1,3 @@
-import { NotFoundError } from "@crm/core";
 import { Badge } from "@crm/design-system/components/badge";
 import { Card } from "@crm/design-system/components/card";
 import { hasPermission } from "@crm/permissions";
@@ -10,8 +9,8 @@ import { ConversationLeadPanel } from "@/components/conversation-lead-panel";
 import { LocalDateTime } from "@/components/local-date-time";
 import { pickProfileMetadata } from "@/lib/contact-profile";
 import { TICKET_STATUS } from "@/lib/ticket-status";
+import { findConversation } from "@/server/find-conversation";
 import {
-  getConversation,
   getConversationDeal,
   getConversationLabels,
   listContactLabels,
@@ -30,15 +29,8 @@ export async function ConversationAside({ conversationId }: { conversationId: st
   const t = await getTranslations("inbox");
   const ts = await getTranslations("ticketStatus");
   const ctx = await requireTenantContext();
-  let conversation;
-  try {
-    conversation = await getConversation(ctx, conversationId);
-  } catch (error) {
-    if (error instanceof NotFoundError) {
-      return <p className="text-ink-muted text-sm">{t("notFound")}</p>;
-    }
-    throw error;
-  }
+  const conversation = await findConversation(ctx, conversationId);
+  if (!conversation) return <p className="text-ink-muted text-sm">{t("notFound")}</p>;
   const [deal, funnels, labels, conversationLabels, contactLabels, history] = await Promise.all([
     getConversationDeal(ctx, conversationId),
     listFunnelsWithStages(ctx),

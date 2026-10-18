@@ -16,6 +16,51 @@ import { paletteStyle } from "@/components/palette";
 import { updateContactProfileAction } from "@/server/actions/contacts";
 import { setContactLabelsAction, setConversationLabelsAction } from "@/server/actions/leads";
 
+/** The open editor of a ficha field: Enter/blur commits, Esc cancels. */
+function FichaInput({
+  multiline,
+  label,
+  draft,
+  pending,
+  onChange,
+  onCommit,
+  onCancel,
+}: {
+  multiline?: boolean;
+  label: string;
+  draft: string;
+  pending: boolean;
+  onChange: (next: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+}) {
+  const shared = {
+    autoFocus: true,
+    value: draft,
+    disabled: pending,
+    onBlur: onCommit,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+      if (e.key === "Enter" && !multiline) onCommit();
+    },
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      onChange(e.target.value),
+    "aria-label": label,
+  };
+  return multiline ? (
+    <textarea
+      {...shared}
+      rows={3}
+      className="bg-page border-line w-full rounded-xs border px-2 py-1 text-sm"
+    />
+  ) : (
+    <input
+      {...shared}
+      className="bg-page border-line w-full rounded-xs border px-1.5 py-0.5 text-sm"
+    />
+  );
+}
+
 /** Click-to-edit text field — Enter/blur commits, Esc cancels. */
 function FichaField({
   label,
@@ -51,29 +96,15 @@ function FichaField({
     return <span className="text-ink block text-sm">{value || "—"}</span>;
   }
   if (editing) {
-    const shared = {
-      autoFocus: true,
-      value: draft,
-      disabled: pending,
-      onBlur: commit,
-      onKeyDown: (e: React.KeyboardEvent) => {
-        if (e.key === "Escape") setEditing(false);
-        if (e.key === "Enter" && !multiline) commit();
-      },
-      "aria-label": label,
-    };
-    return multiline ? (
-      <textarea
-        {...shared}
-        rows={3}
-        className="bg-page border-line w-full rounded-xs border px-2 py-1 text-sm"
-        onChange={(e) => setDraft(e.target.value)}
-      />
-    ) : (
-      <input
-        {...shared}
-        className="bg-page border-line w-full rounded-xs border px-1.5 py-0.5 text-sm"
-        onChange={(e) => setDraft(e.target.value)}
+    return (
+      <FichaInput
+        multiline={multiline}
+        label={label}
+        draft={draft}
+        pending={pending}
+        onChange={setDraft}
+        onCommit={commit}
+        onCancel={() => setEditing(false)}
       />
     );
   }

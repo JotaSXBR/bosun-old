@@ -1,4 +1,5 @@
 import { getServerEnv } from "@crm/config";
+import type { TenantContext } from "@crm/core";
 import { AuthorizationError, DomainError } from "@crm/core";
 import { completeGoogleAuthorization } from "@crm/core/external-connections";
 import { getDb } from "@crm/db";
@@ -41,6 +42,23 @@ function outcomeOf(error: unknown): Outcome {
   return "failed";
 }
 
+async function finish(
+  tenant: TenantContext,
+  grant: { code: string; state: string },
+): Promise<Response> {
+  try {
+    await completeGoogleAuthorization(getDb(), tenant, {
+      input: {
+        ...grant,
+        redirectUri: googleRedirectUri(),
+      },
+    });
+    return redirectTo(CARD_PATH, "ok");
+  } catch (error) {
+    return redirectTo(CARD_PATH, outcomeOf(error));
+  }
+}
+
 /**
  * OAuth redirect target. The organization comes from the session (never from
  * the query); `state` must match the pending consent of that organization.
@@ -54,15 +72,5 @@ export async function GET(request: Request): Promise<Response> {
   const code = params.get("code");
   const state = params.get("state");
   if (!code || !state) return redirectTo(CARD_PATH, "invalid");
-
-  try {
-    await completeGoogleAuthorization(getDb(), tenant, {
-      code,
-      state,
-      redirectUri: googleRedirectUri(),
-    });
-    return redirectTo(CARD_PATH, "ok");
-  } catch (error) {
-    return redirectTo(CARD_PATH, outcomeOf(error));
-  }
+  return finish(tenant, { code, state });
 }

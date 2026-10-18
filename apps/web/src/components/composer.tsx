@@ -321,32 +321,36 @@ function ReplyChip({ preview, onClear }: { preview: string; onClear: () => void 
   );
 }
 
-export function Composer({
-  conversationId,
-  disabled,
-  draftsEnabled,
-  macros,
-  canProposeMacro,
-}: {
-  conversationId: string;
-  disabled: boolean;
-  /** No org LLM credential → the draft buttons sit disabled with a hint. */
-  draftsEnabled: boolean;
-  /** Org quick replies for the `/` picker (empty when none). */
-  macros: MacroRow[];
-  /** Agent path — no direct write, only the proposal affordance. */
-  canProposeMacro: boolean;
-}) {
-  const t = useTranslations("composer");
-  const router = useRouter();
-  const [mode, setMode] = useState<Mode>("reply");
-  const [text, setText] = useState("");
-  const [pending, startTransition] = useTransition();
-  const [sendingMedia, setSendingMedia] = useState(false);
-  const fileInput = useRef<HTMLInputElement | null>(null);
+/** Message text plus caret-aware emoji insertion. */
+function useComposerText() {
   const textarea = useRef<HTMLTextAreaElement | null>(null);
-  const replyTo = useReplyTarget();
-  // `/slug` trigger: the text before the caret ends in a slash-token.
+  const [text, setText] = useState("");
+
+  const insertEmoji = (emoji: string) => {
+    const el = textarea.current;
+    if (!el) {
+      setText((t) => t + emoji);
+      return;
+    }
+    const at = el.selectionStart;
+    const next = text.slice(0, at) + emoji + text.slice(el.selectionEnd);
+    setText(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(at + emoji.length, at + emoji.length);
+    });
+  };
+  return { textarea, text, setText, insertEmoji };
+}
+
+type TextEditor = ReturnType<typeof useComposerText>;
+
+/** `/slug` trigger: the text before the caret ends in a slash-token. */
+function useMacroPicker(
+  macros: MacroRow[],
+  editor: Pick<TextEditor, "textarea" | "text" | "setText">,
+) {
+  const { textarea, text, setText } = editor;
   const [macroQuery, setMacroQuery] = useState<string | null>(null);
   const [macroActive, setMacroActive] = useState(0);
   const macroMatches =
@@ -370,29 +374,60 @@ export function Composer({
       );
     });
   };
-  // "Editar" on a draft card publishes the body here.
-  useDraftFill((body) => {
-    setText(body);
-    setMode("reply");
-    textarea.current?.focus();
-  });
-  // Presence only flows on the reply tab — internal notes never reach the remote.
-  const presence = useChatPresence(conversationId, !disabled && mode === "reply");
+  return { macroQuery, setMacroQuery, macroActive, setMacroActive, macroMatches, pickMacro };
+}
 
-  const insertEmoji = (emoji: string) => {
-    const el = textarea.current;
-    if (!el) {
-      setText((t) => t + emoji);
-      return;
+type MacroPicker = ReturnType<typeof useMacroPicker>;
+
+/** Picker keyboard: Escape closes, arrows move, Enter picks. True when the key was consumed. */
+function handleMacroKey(e: React.KeyboardEvent, picker: MacroPicker): boolean {
+  const matches = picker.macroMatches;
+  if (e.key === "Escape") {
+    picker.setMacroQuery(null);
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    if (matches.length > 0) {
+      picker.setMacroActive(
+        (i) => (i + (e.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length,
+      );
     }
-    const at = el.selectionStart;
-    const next = text.slice(0, at) + emoji + text.slice(el.selectionEnd);
-    setText(next);
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(at + emoji.length, at + emoji.length);
-    });
-  };
+  } else if (e.key === "Enter" && matches.length > 0) {
+    picker.pickMacro(matches[picker.macroActive] ?? matches[0]!);
+  } else {
+    return false;
+  }
+  e.preventDefault();
+  return true;
+}
+
+/** Upload body for an attachment; the typed text becomes its caption. */
+function mediaForm(args: {
+  conversationId: string;
+  file: File;
+  caption: string;
+  replyToId?: string;
+}) {
+  const form = new FormData();
+  form.set("conversationId", args.conversationId);
+  form.set("file", args.file);
+  if (args.caption) form.set("caption", args.caption);
+  if (args.replyToId) form.set("replyToId", args.replyToId);
+  return form;
+}
+
+/** Send / draft / attach actions of the composer and their pending flags. */
+function useComposerActions(args: {
+  conversationId: string;
+  mode: Mode;
+  text: string;
+  setText: (text: string) => void;
+  replyTo: ReturnType<typeof useReplyTarget>;
+  presence: ReturnType<typeof useChatPresence>;
+}) {
+  const { conversationId, mode, text, setText, replyTo, presence } = args;
+  const t = useTranslations("composer");
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [sendingMedia, setSendingMedia] = useState(false);
 
   const send = () => {
     const trimmed = text.trim();
@@ -437,13 +472,13 @@ export function Composer({
       toast.error(t("uploadTooLarge"));
       return;
     }
-    const caption = text.trim();
     setSendingMedia(true);
-    const form = new FormData();
-    form.set("conversationId", conversationId);
-    form.set("file", file);
-    if (caption) form.set("caption", caption);
-    if (replyTo) form.set("replyToId", replyTo.externalId);
+    const form = mediaForm({
+      conversationId,
+      file,
+      caption: text.trim(),
+      ...(replyTo ? { replyToId: replyTo.externalId } : {}),
+    });
     void sendMediaMessageAction(form)
       .then((result) => {
         setSendingMedia(false);
@@ -463,6 +498,48 @@ export function Composer({
       });
   };
 
+  return { pending, sendingMedia, send, requestDraft, sendFile };
+}
+
+export function Composer({
+  conversationId,
+  disabled,
+  draftsEnabled,
+  macros,
+  canProposeMacro,
+}: {
+  conversationId: string;
+  disabled: boolean;
+  /** No org LLM credential → the draft buttons sit disabled with a hint. */
+  draftsEnabled: boolean;
+  /** Org quick replies for the `/` picker (empty when none). */
+  macros: MacroRow[];
+  /** Agent path — no direct write, only the proposal affordance. */
+  canProposeMacro: boolean;
+}) {
+  const t = useTranslations("composer");
+  const [mode, setMode] = useState<Mode>("reply");
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const replyTo = useReplyTarget();
+  const { textarea, text, setText, insertEmoji } = useComposerText();
+  const picker = useMacroPicker(macros, { textarea, text, setText });
+  // "Editar" on a draft card publishes the body here.
+  useDraftFill((body) => {
+    setText(body);
+    setMode("reply");
+    textarea.current?.focus();
+  });
+  // Presence only flows on the reply tab — internal notes never reach the remote.
+  const presence = useChatPresence(conversationId, !disabled && mode === "reply");
+  const { pending, sendingMedia, send, requestDraft, sendFile } = useComposerActions({
+    conversationId,
+    mode,
+    text,
+    setText,
+    replyTo,
+    presence,
+  });
+
   return (
     <div className="space-y-2 border-t pt-4" data-testid="composer">
       <ModeTabs mode={mode} onChange={setMode} />
@@ -470,15 +547,15 @@ export function Composer({
       {replyTo && <ReplyChip preview={replyTo.preview} onClear={() => setReplyTarget(null)} />}
 
       <div className="relative">
-        {macroQuery !== null && (
+        {picker.macroQuery !== null && (
           <MacroPicker
-            matches={macroMatches}
-            query={macroQuery}
-            active={macroActive}
+            matches={picker.macroMatches}
+            query={picker.macroQuery}
+            active={picker.macroActive}
             canPropose={canProposeMacro}
-            onPick={pickMacro}
-            onHover={setMacroActive}
-            onClose={() => setMacroQuery(null)}
+            onPick={picker.pickMacro}
+            onHover={picker.setMacroActive}
+            onClose={() => picker.setMacroQuery(null)}
           />
         )}
         <Textarea
@@ -490,8 +567,8 @@ export function Composer({
             if (mode === "reply") presence.signal("typing");
             const caret = e.target.selectionStart;
             const trigger = MACRO_TRIGGER.exec(next.slice(0, caret));
-            setMacroQuery(trigger ? (trigger[1] ?? "").toLowerCase() : null);
-            setMacroActive(0);
+            picker.setMacroQuery(trigger ? (trigger[1] ?? "").toLowerCase() : null);
+            picker.setMacroActive(0);
           }}
           placeholder={
             disabled
@@ -503,29 +580,7 @@ export function Composer({
           disabled={disabled || pending}
           rows={3}
           onKeyDown={(e) => {
-            if (macroQuery !== null) {
-              if (e.key === "Escape") {
-                e.preventDefault();
-                setMacroQuery(null);
-                return;
-              }
-              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                e.preventDefault();
-                if (macroMatches.length > 0) {
-                  setMacroActive(
-                    (i) =>
-                      (i + (e.key === "ArrowDown" ? 1 : -1) + macroMatches.length) %
-                      macroMatches.length,
-                  );
-                }
-                return;
-              }
-              if (e.key === "Enter" && macroMatches.length > 0) {
-                e.preventDefault();
-                pickMacro(macroMatches[macroActive] ?? macroMatches[0]!);
-                return;
-              }
-            }
+            if (picker.macroQuery !== null && handleMacroKey(e, picker)) return;
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") send();
           }}
         />

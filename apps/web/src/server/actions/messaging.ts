@@ -53,7 +53,7 @@ export async function pickupConversationAction(
 ): Promise<MessagingActionResult> {
   const ctx = await requireTenantContext();
   try {
-    const conv = await pickupConversation(getDb(), ctx, input);
+    const conv = await pickupConversation(getDb(), ctx, { input });
     revalidateInbox();
     return { ok: true, id: conv.id };
   } catch (error) {
@@ -79,8 +79,11 @@ export async function resolveConversationAction(
 ): Promise<MessagingActionResult> {
   const ctx = await requireTenantContext();
   try {
-    const conv = await resolveConversation(getDb(), ctx, input, {
-      enqueue: (executor, payload) => enqueueObserverAnalyze(payload, executor),
+    const conv = await resolveConversation(getDb(), ctx, {
+      input,
+      deps: {
+        enqueue: (executor, payload) => enqueueObserverAnalyze(payload, executor),
+      },
     });
     revalidateInbox();
     return { ok: true, id: conv.id };
@@ -133,7 +136,7 @@ export async function sendOutboundMessageAction(
 ): Promise<MessagingActionResult> {
   const ctx = await requireTenantContext();
   try {
-    const message = await sendOutboundMessage(getDb(), ctx, input);
+    const message = await sendOutboundMessage(getDb(), ctx, { input });
     revalidateInbox();
     return { ok: true, id: message.id };
   } catch (error) {
@@ -177,7 +180,7 @@ export async function markConversationReadAction(
 ): Promise<MessagingActionResult> {
   const ctx = await requireTenantContext();
   try {
-    await markConversationRead(getDb(), ctx, input);
+    await markConversationRead(getDb(), ctx, { input });
     return { ok: true, id: input.conversationId };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Não foi possível marcar como lido.") };

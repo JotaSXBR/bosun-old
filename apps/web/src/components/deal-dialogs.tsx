@@ -14,6 +14,7 @@ import { useState, useTransition } from "react";
 
 import { NewContactDialog } from "@/components/contact-dialogs";
 import { ContactSelect } from "@/components/contact-select";
+import { useOnOpen } from "@/lib/use-on-open";
 import { createDealAction, updateDealAction } from "@/server/actions/leads";
 
 function toReais(valueCents: number): string {
@@ -194,6 +195,29 @@ function DealFormFields({
   );
 }
 
+type DealFormArgs = {
+  deal: DealCardRow | undefined;
+  defaultStageId: string | undefined;
+  stages: StageRow[];
+  open: boolean;
+};
+
+/** Form state, reset each time the dialog opens (mounted once, reused for create/edit). */
+function useDealForm({ deal, defaultStageId, stages, open }: DealFormArgs) {
+  const initialForm = (): DealFormState => ({
+    title: deal?.title ?? "",
+    stageId: pickStageId(deal, defaultStageId, stages),
+    contactId: deal?.contactId ?? "",
+    value: toReais(deal?.valueCents ?? 0),
+    attrs: attrsToRows(deal?.customAttributes ?? {}),
+  });
+  const [form, setFormState] = useState<DealFormState>(initialForm);
+  useOnOpen(open, () => setFormState(initialForm()));
+  const setForm = (patch: Partial<DealFormState>) =>
+    setFormState((prev) => ({ ...prev, ...patch }));
+  return { form, setForm };
+}
+
 export function DealFormDialog({
   funnelId,
   stages,
@@ -213,23 +237,8 @@ export function DealFormDialog({
   const tc = useTranslations("common");
   const router = useRouter();
   const editing = Boolean(deal);
-  const initialForm = (): DealFormState => ({
-    title: deal?.title ?? "",
-    stageId: pickStageId(deal, defaultStageId, stages),
-    contactId: deal?.contactId ?? "",
-    value: toReais(deal?.valueCents ?? 0),
-    attrs: attrsToRows(deal?.customAttributes ?? {}),
-  });
-  const [form, setFormState] = useState<DealFormState>(initialForm);
-  // Reset the form each time the dialog opens (mounted once, reused for create/edit).
-  const [wasOpen, setWasOpen] = useState(open);
-  if (wasOpen !== open) {
-    setWasOpen(open);
-    if (open) setFormState(initialForm());
-  }
+  const { form, setForm } = useDealForm({ deal, defaultStageId, stages, open });
   const [pending, startTransition] = useTransition();
-  const setForm = (patch: Partial<DealFormState>) =>
-    setFormState((prev) => ({ ...prev, ...patch }));
   const { title, stageId, contactId, value, attrs } = form;
 
   function submit() {

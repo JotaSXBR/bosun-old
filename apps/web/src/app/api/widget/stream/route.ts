@@ -18,13 +18,8 @@ export function OPTIONS(): Response {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
 
-/**
- * Public widget SSE — the session token resolves the visitor's current
- * conversation; org-scoped domain events are filtered down to it and
- * forwarded as a bare "updated" ping (the widget refetches history, which
- * filters out internal notes — event payloads never reach the visitor).
- */
-export async function GET(request: NextRequest): Promise<Response> {
+/** The visitor session behind the token, or the ready error response. */
+async function resolveTarget(request: NextRequest) {
   const token = new URL(request.url).searchParams.get("token");
   if (!token) {
     return Response.json({ ok: false, error: "missing_token" }, { status: 400 });
@@ -36,6 +31,18 @@ export async function GET(request: NextRequest): Promise<Response> {
   if (!target) {
     return Response.json({ ok: false, error: "unknown_session" }, { status: 404 });
   }
+  return target;
+}
+
+/**
+ * Public widget SSE — the session token resolves the visitor's current
+ * conversation; org-scoped domain events are filtered down to it and
+ * forwarded as a bare "updated" ping (the widget refetches history, which
+ * filters out internal notes — event payloads never reach the visitor).
+ */
+export async function GET(request: NextRequest): Promise<Response> {
+  const target = await resolveTarget(request);
+  if (target instanceof Response) return target;
   let conversationId = target.conversationId;
 
   const encoder = new TextEncoder();

@@ -43,8 +43,10 @@ export async function connectGoogleAction(input: {
   const ctx = await requireTenantContext();
   try {
     const { authUrl } = await saveGoogleClient(getDb(), ctx, {
-      ...input,
-      redirectUri: googleRedirectUri(),
+      input: {
+        ...input,
+        redirectUri: googleRedirectUri(),
+      },
     });
     revalidatePath(CHANNELS_PATH);
     return { ok: true, authUrl };
@@ -80,6 +82,14 @@ const SYNC_COOLDOWN_MS = 60_000;
 // shortcut: per-process memory, so N instances allow N requests per window; move to the DB if abused.
 const lastSyncRequest = new Map<string, number>();
 
+/** False when the org already asked less than a minute ago; otherwise records this request. */
+function claimSyncSlot(organizationId: string): boolean {
+  const last = lastSyncRequest.get(organizationId);
+  if (last !== undefined && Date.now() - last < SYNC_COOLDOWN_MS) return false;
+  lastSyncRequest.set(organizationId, Date.now());
+  return true;
+}
+
 /**
  * Records the org's consent to automatic sync and queues a sweep, which enqueues
  * one Google sync job per pending contact (the job skips what is unchanged).
@@ -87,11 +97,9 @@ const lastSyncRequest = new Map<string, number>();
  */
 export async function syncGoogleContactsAction(): Promise<GoogleSyncResult> {
   const ctx = await requireTenantContext();
-  const last = lastSyncRequest.get(ctx.organizationId);
-  if (last !== undefined && Date.now() - last < SYNC_COOLDOWN_MS) {
+  if (!claimSyncSlot(ctx.organizationId)) {
     return { ok: false, error: "A sincronização já foi iniciada. Aguarde um minuto." };
   }
-  lastSyncRequest.set(ctx.organizationId, Date.now());
   try {
     await enableGoogleAutoSync(getDb(), ctx);
     const { skipped } = await enqueueContactGoogleSweep({ organizationId: ctx.organizationId });

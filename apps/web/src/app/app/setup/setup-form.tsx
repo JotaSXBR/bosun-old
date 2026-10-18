@@ -12,6 +12,26 @@ import { useState } from "react";
 
 import { saveSetupEmailAction } from "@/server/actions/setup";
 
+function readSetupValues(fd: FormData, provider: string): Record<string, unknown> {
+  const str = (key: string) => {
+    const v = fd.get(key);
+    return typeof v === "string" ? v : "";
+  };
+  const smtpPort = str("smtpPort");
+  return {
+    provider,
+    from: str("from"),
+    resendApiKey: str("resendApiKey"),
+    smtp: {
+      host: str("smtpHost"),
+      port: smtpPort === "" ? "" : Number(smtpPort),
+      user: str("smtpUser"),
+      password: str("smtpPassword"),
+      secure: fd.has("smtpSecure"),
+    },
+  };
+}
+
 /**
  * Minimal e-mail provider form for the first-run wizard. Secrets are sent
  * raw (first save — nothing to preserve); the server stores them encrypted.
@@ -26,23 +46,7 @@ export function SetupForm() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
-    const str = (key: string) => {
-      const v = fd.get(key);
-      return typeof v === "string" ? v : "";
-    };
-    const smtpPort = str("smtpPort");
-    const values: Record<string, unknown> = {
-      provider,
-      from: str("from"),
-      resendApiKey: str("resendApiKey"),
-      smtp: {
-        host: str("smtpHost"),
-        port: smtpPort === "" ? "" : Number(smtpPort),
-        user: str("smtpUser"),
-        password: str("smtpPassword"),
-        secure: fd.has("smtpSecure"),
-      },
-    };
+    const values = readSetupValues(fd, provider);
     setPending(true);
     const result = await saveSetupEmailAction(values);
     setPending(false);

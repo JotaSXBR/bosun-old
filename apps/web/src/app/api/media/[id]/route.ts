@@ -1,13 +1,12 @@
 import type { TenantContext } from "@crm/core";
-import { AuthorizationError, DomainError, NotFoundError } from "@crm/core";
 import { providerForConnection } from "@crm/core/integrations";
 import type { MediaResolverDeps } from "@crm/core/messaging";
 import { resolveMessageMedia } from "@crm/core/messaging";
 import type { Database } from "@crm/db";
 import { getDb } from "@crm/db";
-import { captureException } from "@crm/observability";
 
 import { mediaResponse } from "@/lib/media-response";
+import { routeErrorResponse } from "@/lib/route-error";
 import { getStorage } from "@/server/storage";
 import { getTenantContext } from "@/server/tenant";
 
@@ -37,7 +36,7 @@ async function resolveMedia(
       return { body: media.body, contentType: media.contentType ?? undefined };
     },
   };
-  return resolveMessageMedia(db, tenant, { messageId }, deps);
+  return resolveMessageMedia(db, tenant, { input: { messageId }, deps });
 }
 
 /**
@@ -60,16 +59,6 @@ export async function GET(
     if (!media) return Response.json({ ok: false }, { status: 404 });
     return mediaResponse(media.body, media.contentType, media.filename);
   } catch (error) {
-    if (error instanceof NotFoundError) {
-      return Response.json({ ok: false }, { status: 404 });
-    }
-    if (error instanceof AuthorizationError) {
-      return Response.json({ ok: false }, { status: 403 });
-    }
-    if (error instanceof DomainError) {
-      return Response.json({ ok: false, error: error.code }, { status: 400 });
-    }
-    captureException(error, { route: ROUTE_TAG });
-    return Response.json({ ok: false }, { status: 500 });
+    return routeErrorResponse(error, ROUTE_TAG);
   }
 }

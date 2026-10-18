@@ -19,6 +19,7 @@ import { useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
+import type { CreateConnectionResult } from "@/server/actions/integrations";
 import { createChannelConnectionAction } from "@/server/actions/integrations";
 
 import { PairingPanel } from "./pairing-panel";
@@ -63,6 +64,21 @@ const META_FIELDS = [
   { name: "graphApiVersion", label: "", placeholder: "v26.0" },
 ] as const;
 
+const emptyValues = (kind: FormValues["kind"]): FormValues =>
+  kind === "meta_cloud"
+    ? {
+        kind,
+        name: "",
+        phoneNumberId: "",
+        accessToken: "",
+        appSecret: "",
+        verifyToken: "",
+        graphApiVersion: "",
+      }
+    : { kind, name: "" };
+
+type Created = Extract<CreateConnectionResult, { ok: true }>;
+
 export function NewConnectionForm() {
   const t = useTranslations("integrations");
   const form = useForm<FormValues>({
@@ -72,28 +88,7 @@ export function NewConnectionForm() {
   const kind = useWatch({ control: form.control, name: "kind" });
   const [pairing, setPairing] = useState<{ id: string; qr?: QrCode } | null>(null);
 
-  async function onSubmit(values: FormValues) {
-    const { kind, name, ...credentials } = values;
-    const result = await createChannelConnectionAction(
-      kind === "meta_cloud" ? { kind, name, credentials } : { kind, name },
-    );
-    if (!result.ok) {
-      toast.error(result.error);
-      return;
-    }
-    form.reset(
-      kind === "meta_cloud"
-        ? {
-            kind,
-            name: "",
-            phoneNumberId: "",
-            accessToken: "",
-            appSecret: "",
-            verifyToken: "",
-            graphApiVersion: "",
-          }
-        : { kind, name: "" },
-    );
+  function announce(kind: FormValues["kind"], result: Created) {
     if (result.warning) toast.warning(result.warning);
     if (kind === "site_chat") {
       toast.success(t("form.widgetCreated"));
@@ -108,6 +103,19 @@ export function NewConnectionForm() {
         result.status === "connected" ? t("form.connectedValidated") : t("form.created"),
       );
     }
+  }
+
+  async function onSubmit(values: FormValues) {
+    const { kind, name, ...credentials } = values;
+    const result = await createChannelConnectionAction(
+      kind === "meta_cloud" ? { kind, name, credentials } : { kind, name },
+    );
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+    form.reset(emptyValues(kind));
+    announce(kind, result);
   }
 
   return (

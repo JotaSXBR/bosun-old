@@ -30,25 +30,46 @@ function toColumns(board: BoardData): ColumnState[] {
   return board.stages.map((s) => ({ stage: s, deals: s.deals }));
 }
 
-/** Applies the drop to local columns; returns the persisted target position. */
-function applyDrop(columns: ColumnState[], dealId: string, overId: string): number | null {
-  const sourceCol = columns.find((c) => c.deals.some((d) => d.id === dealId));
-  const targetCol =
-    columns.find((c) => c.stage.id === overId) ??
-    columns.find((c) => c.deals.some((d) => d.id === overId));
-  if (!sourceCol || !targetCol) return null;
+const findTargetColumn = (columns: ColumnState[], overId: string) =>
+  columns.find((c) => c.stage.id === overId) ??
+  columns.find((c) => c.deals.some((d) => d.id === overId));
 
+/** Where the deal leaves from and lands in (after the removal shift); null for a no-op drop. */
+function planMove(
+  { sourceCol, targetCol }: { sourceCol: ColumnState; targetCol: ColumnState },
+  { dealId, overId }: { dealId: string; overId: string },
+): { fromIndex: number; adjusted: number } | null {
   const overIndex = targetCol.deals.findIndex((d) => d.id === overId);
   const toIndex = overIndex === -1 ? targetCol.deals.length : overIndex;
   const fromIndex = sourceCol.deals.findIndex((d) => d.id === dealId);
   const sameColumn = sourceCol.stage.id === targetCol.stage.id;
   if (sameColumn && (fromIndex === toIndex || fromIndex === toIndex - 1)) return null;
-
-  const deal = sourceCol.deals[fromIndex]!;
   const adjusted = sameColumn && fromIndex < toIndex ? toIndex - 1 : toIndex;
-  sourceCol.deals.splice(fromIndex, 1);
-  targetCol.deals.splice(adjusted, 0, { ...deal, stageId: targetCol.stage.id });
-  return adjusted;
+  return { fromIndex, adjusted };
+}
+
+/** Applies the drop to local columns; returns the persisted target position. */
+function applyDrop(columns: ColumnState[], dealId: string, overId: string): number | null {
+  const sourceCol = columns.find((c) => c.deals.some((d) => d.id === dealId));
+  const targetCol = findTargetColumn(columns, overId);
+  if (!sourceCol || !targetCol) return null;
+
+  const move = planMove({ sourceCol, targetCol }, { dealId, overId });
+  if (!move) return null;
+  const [deal] = sourceCol.deals.splice(move.fromIndex, 1);
+  targetCol.deals.splice(move.adjusted, 0, { ...deal!, stageId: targetCol.stage.id });
+  return move.adjusted;
+}
+
+/** Local copy of the columns (optimistic drag); a server refresh replaces it — adjust-during-render. */
+function useBoardColumns(board: BoardData) {
+  const [columns, setColumns] = useState<ColumnState[]>(() => toColumns(board));
+  const [prevBoard, setPrevBoard] = useState(board);
+  if (prevBoard !== board) {
+    setPrevBoard(board);
+    setColumns(toColumns(board));
+  }
+  return [columns, setColumns] as const;
 }
 
 export function KanbanBoard({
@@ -64,18 +85,11 @@ export function KanbanBoard({
   canWrite: boolean;
   canManage: boolean;
 }) {
-  const [columns, setColumns] = useState<ColumnState[]>(() => toColumns(board));
+  const [columns, setColumns] = useBoardColumns(board);
   const [activeDeal, setActiveDeal] = useState<DealCardRow | null>(null);
   const [dialogs, setDialogs] = useState<KanbanDialogState>(DIALOGS_CLOSED);
   const patchDialogs = (patch: Partial<KanbanDialogState>) =>
     setDialogs((prev) => ({ ...prev, ...patch }));
-
-  // Server refresh → resync local columns (adjust-during-render pattern).
-  const [prevBoard, setPrevBoard] = useState(board);
-  if (prevBoard !== board) {
-    setPrevBoard(board);
-    setColumns(toColumns(board));
-  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -96,9 +110,7 @@ export function KanbanBoard({
 
   /** Shared move path — drag drop and the card's "Mover para" menu. */
   function moveDeal(dealId: string, overId: string) {
-    const targetCol =
-      columns.find((c) => c.stage.id === overId) ??
-      columns.find((c) => c.deals.some((d) => d.id === overId));
+    const targetCol = findTargetColumn(columns, overId);
     if (!targetCol) return;
 
     const previous = columns;

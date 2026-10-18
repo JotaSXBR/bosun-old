@@ -42,20 +42,29 @@ function initialForm(contact: EditableContact): FormState {
   };
 }
 
+/** Form values plus the baseline they are diffed against; `reload` re-reads the contact. */
+function useProfileDraft(contact: EditableContact) {
+  const [baseline, setBaseline] = useState<FormState>(() => initialForm(contact));
+  const [form, setFormState] = useState<FormState>(baseline);
+  const setForm = (patch: Partial<FormState>) => setFormState((prev) => ({ ...prev, ...patch }));
+  const reload = () => {
+    const fresh = initialForm(contact);
+    setBaseline(fresh);
+    setFormState(fresh);
+  };
+  return { baseline, form, setForm, reload };
+}
+
 /** Row action for /app/contacts: edits the profile; saves only what changed, empty clears. */
 export function EditContactButton({ contact }: { contact: EditableContact }) {
   const t = useTranslations("contacts.edit");
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [baseline, setBaseline] = useState<FormState>(() => initialForm(contact));
-  const [form, setFormState] = useState<FormState>(baseline);
+  const { baseline, form, setForm, reload } = useProfileDraft(contact);
   const [pending, startTransition] = useTransition();
-  const setForm = (patch: Partial<FormState>) => setFormState((prev) => ({ ...prev, ...patch }));
 
   function openDialog() {
-    const fresh = initialForm(contact);
-    setBaseline(fresh);
-    setFormState(fresh);
+    reload();
     setOpen(true);
   }
 
