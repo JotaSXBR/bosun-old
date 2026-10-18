@@ -8,8 +8,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { AuthorizationError, DomainError } from "../../errors";
 import type { TenantContext } from "../../tenant/context";
+import { isEligible } from "./google-contact-map";
 import type { GoogleOAuthClient } from "./google-oauth";
-import { getGoogleSyncSummary, listGoogleSyncContactIds } from "./google-sync-contacts";
+import {
+  getGoogleSyncSummary,
+  listGoogleSyncContactIds,
+  listPendingGoogleSyncContactIds,
+} from "./google-sync-contacts";
 import { completeGoogleAuthorization, saveGoogleClient } from "./service";
 
 const { contacts, externalConnections, organizations } = schema;
@@ -121,7 +126,10 @@ describe("getGoogleSyncSummary", () => {
     await addContact(orgId, "5511999990002@c.us", {
       google: { resourceName: "people/c1", lastSyncedAt: "2026-10-01T10:00:00.000Z" },
     });
-    await addContact(orgId, "site:visitor-1", { email: "a@acme.test" });
+    await addContact(orgId, "site:visitor-1", {
+      email: "a@acme.test",
+      google: { lastError: "rate_limited" },
+    });
     await addContact(orgId, "site:visitor-2"); // ineligible: no phone, no e-mail
     await addContact(orgId, "123@lid"); // ineligible: opaque id
     await addContact(otherOrgId, "5511999990009@c.us");
@@ -129,6 +137,7 @@ describe("getGoogleSyncSummary", () => {
     expect(await getGoogleSyncSummary(db, ctx("viewer"))).toEqual({
       eligible: 3,
       synced: 1,
+      failed: 1,
       lastSyncedAt: "2026-10-01T10:00:00.000Z",
     });
     await clearOrg(otherOrgId);
@@ -138,6 +147,7 @@ describe("getGoogleSyncSummary", () => {
     expect(await getGoogleSyncSummary(db, ctx("admin"))).toEqual({
       eligible: 0,
       synced: 0,
+      failed: 0,
       lastSyncedAt: null,
     });
   });
@@ -177,5 +187,95 @@ describe("listGoogleSyncContactIds", () => {
     }
     expect(seen.sort()).toEqual([...eligible].sort());
     await clearOrg(otherOrgId);
+  });
+});
+
+describe("listPendingGoogleSyncContactIds", () => {
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+  const HOUR = 3_600_000;
+
+  /** Backdates updated_at so "edited after the attempt" can be told apart from "just inserted". */
+  const backdate = (id: string, ms: number) =>
+    withTenant(db, orgId, (tx) =>
+      tx
+        .update(contacts)
+        .set({ updatedAt: new Date(Date.now() - ms) })
+        .where(eq(contacts.id, id)),
+    );
+
+  it("agrees with isEligible on the SQL eligibility pre-filter", async () => {
+    const cases: [string, Record<string, unknown>][] = [
+      ["551199999@c.us", {}], // 9 digits
+      ["5511999@c.us", {}], // 7 digits: too short
+      ["12345678@c.us", {}], // 8 digits: minimum
+      ["123456789012345@c.us", {}], // 15 digits: maximum
+      ["1234567890123456@c.us", {}], // 16 digits: too long
+      ["0511999990001@c.us", {}], // leading zero
+      ["123@lid", {}],
+      ["site:visitor-1", {}],
+      ["site:visitor-2", { email: "a@acme.test" }],
+      ["site:visitor-3", { email: "   " }],
+      ["site:visitor-4", { email: "" }],
+      ["site:visitor-5", { email: 5 }],
+    ];
+    const byId = new Map<string, string>();
+    for (const [channelUserId, metadata] of cases) {
+      byId.set(await addContact(orgId, channelUserId, metadata), channelUserId);
+    }
+    const { ids } = await listPendingGoogleSyncContactIds(db, orgId, { limit: 100 });
+    const expected = (await withTenant(db, orgId, (tx) => tx.select().from(contacts)))
+      .filter(isEligible)
+      .map((contact) => contact.id);
+    expect(ids.toSorted()).toEqual(expected.toSorted());
+    expect(ids.length).toBeGreaterThan(0);
+  });
+
+  it("lists never-tried, edited-since and long-failed contacts only", async () => {
+    const never = await addContact(orgId, "5511999990001@c.us");
+    const unchanged = await addContact(orgId, "5511999990002@c.us", {
+      google: { resourceName: "people/c1", lastSyncedAt: ago(HOUR), lastAttemptAt: ago(1000) },
+    });
+    const edited = await addContact(orgId, "5511999990003@c.us", {
+      google: {
+        resourceName: "people/c2",
+        lastSyncedAt: ago(2 * HOUR),
+        lastAttemptAt: ago(2 * HOUR),
+      },
+    });
+    const legacySynced = await addContact(orgId, "5511999990004@c.us", {
+      google: { resourceName: "people/c3", lastSyncedAt: ago(1000) }, // 3a data: no lastAttemptAt
+    });
+    const failedRecently = await addContact(orgId, "5511999990005@c.us", {
+      google: { lastError: "rate_limited", lastAttemptAt: ago(10 * 60_000) },
+    });
+    const failedLongAgo = await addContact(orgId, "5511999990006@c.us", {
+      google: { lastError: "rate_limited", lastAttemptAt: ago(2 * HOUR) },
+    });
+    await backdate(unchanged, 5000);
+    await backdate(edited, HOUR); // updated_at (1h ago) is after lastAttemptAt (2h ago)
+    await backdate(legacySynced, 5000);
+    await backdate(failedRecently, HOUR);
+    await backdate(failedLongAgo, 3 * HOUR);
+    await addContact(otherOrgId, "5511999990009@c.us");
+
+    const { ids } = await listPendingGoogleSyncContactIds(db, orgId, { limit: 100 });
+    expect(ids.toSorted()).toEqual([never, edited, failedLongAgo].toSorted());
+    await clearOrg(otherOrgId);
+  });
+
+  it("pages with a keyset cursor", async () => {
+    const created = [
+      await addContact(orgId, "5511999990001@c.us"),
+      await addContact(orgId, "5511999990002@c.us"),
+      await addContact(orgId, "5511999990003@c.us"),
+    ].toSorted();
+    const first = await listPendingGoogleSyncContactIds(db, orgId, { limit: 2 });
+    expect(first.ids).toEqual(created.slice(0, 2));
+    expect(first.next).toBe(created[1]);
+    const second = await listPendingGoogleSyncContactIds(db, orgId, {
+      limit: 2,
+      after: first.next!,
+    });
+    expect(second).toEqual({ ids: [created[2]], next: null });
   });
 });

@@ -8,6 +8,7 @@ import { getTranslations } from "next-intl/server";
 import { ContactFicha } from "@/components/contact-ficha";
 import { ConversationLeadPanel } from "@/components/conversation-lead-panel";
 import { LocalDateTime } from "@/components/local-date-time";
+import { pickProfileMetadata } from "@/lib/contact-profile";
 import { TICKET_STATUS } from "@/lib/ticket-status";
 import {
   getConversation,
@@ -54,7 +55,7 @@ export async function ConversationAside({ conversationId }: { conversationId: st
         displayName={conversation.contactDisplayName ?? ""}
         channelUserId={conversation.contactChannelUserId}
         avatarUrl={conversation.contactAvatarUrl}
-        metadata={conversation.contactMetadata}
+        metadata={pickProfileMetadata(conversation.contactMetadata)}
         contactLabels={contactLabels}
         conversationLabels={conversationLabels}
         allLabels={labels}

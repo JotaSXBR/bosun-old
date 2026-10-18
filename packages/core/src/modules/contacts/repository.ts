@@ -140,6 +140,61 @@ export async function updateContactGoogleSync(
     .where(and(eq(contacts.id, contactId), eq(contacts.organizationId, organizationId)));
 }
 
+/** Coarse SQL mirror of `isEligible` (JS stays the authority for per-contact decisions). */
+const googleEligible = sql`(${contacts.channelUserId} ~ '^[1-9][0-9]{7,14}@c\\.us$' or ${contacts.metadata}->>'email' ~ '\\S')`;
+
+/** Counts for the Google card in one query — call inside withTenant. */
+export async function summarizeGoogleSync(
+  executor: DbExecutor,
+  organizationId: string,
+): Promise<{ eligible: number; synced: number; failed: number; lastSyncedAt: string | null }> {
+  const google = sql`${contacts.metadata}->'google'`;
+  const [row] = await executor
+    .select({
+      eligible: sql<number>`count(*)::int`,
+      synced: sql<number>`(count(*) filter (where ${google}->>'lastSyncedAt' is not null))::int`,
+      failed: sql<number>`(count(*) filter (where ${google}->>'lastError' is not null))::int`,
+      lastSyncedAt: sql<string | null>`max(${google}->>'lastSyncedAt')`,
+    })
+    .from(contacts)
+    .where(and(eq(contacts.organizationId, organizationId), googleEligible));
+  return row!;
+}
+
+/**
+ * Keyset page of contacts the Google sweep should (re)send — call inside withTenant.
+ * Coarse SQL mirror of `isEligible` (callers re-check it in JS, the authority) AND
+ * never attempted, edited since the last attempt, or failed over an hour ago.
+ */
+export async function listPendingGoogleSyncContacts(
+  executor: DbExecutor,
+  organizationId: string,
+  options: { after?: string | undefined; limit: number },
+): Promise<Pick<ContactRow, "id" | "channelUserId" | "displayName" | "metadata">[]> {
+  const google = sql`${contacts.metadata}->'google'`;
+  const attemptedAt = sql`coalesce(${google}->>'lastAttemptAt', ${google}->>'lastSyncedAt')::timestamptz`;
+  return executor
+    .select({
+      id: contacts.id,
+      channelUserId: contacts.channelUserId,
+      displayName: contacts.displayName,
+      metadata: contacts.metadata,
+    })
+    .from(contacts)
+    .where(
+      and(
+        eq(contacts.organizationId, organizationId),
+        options.after ? gt(contacts.id, options.after) : undefined,
+        googleEligible,
+        sql`(${attemptedAt} is null
+          or ${contacts.updatedAt} > ${attemptedAt}
+          or (${google}->>'lastError' is not null and ${attemptedAt} < now() - interval '1 hour'))`,
+      ),
+    )
+    .orderBy(contacts.id)
+    .limit(options.limit);
+}
+
 /** Keyset page of contacts (ordered by id) for the Google sync scan — call inside withTenant. */
 export async function pageContactsForSync(
   executor: DbExecutor,

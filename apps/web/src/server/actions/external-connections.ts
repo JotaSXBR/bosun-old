@@ -1,10 +1,10 @@
 "use server";
 
-import { enqueueContactGoogleSync } from "@crm/automation";
+import { enqueueContactGoogleSweep } from "@crm/automation";
 import { DomainError } from "@crm/core";
 import {
   disconnectGoogle,
-  listGoogleSyncContactIds,
+  enableGoogleAutoSync,
   saveGoogleClient,
   verifyGoogleConnection,
 } from "@crm/core/external-connections";
@@ -23,8 +23,6 @@ export type GoogleVerifyResult =
   { ok: true; status: string; error: string | null } | { ok: false; error: string };
 export type GoogleActionResult = { ok: true } | { ok: false; error: string };
 export type GoogleSyncResult = { ok: true; queued: number } | { ok: false; error: string };
-
-const SYNC_PAGE_SIZE = 200;
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof z.ZodError) {
@@ -83,8 +81,9 @@ const SYNC_COOLDOWN_MS = 60_000;
 const lastSyncRequest = new Map<string, number>();
 
 /**
- * Queues one Google sync job per eligible contact (the job skips what is
- * unchanged). A failure midway reports how many were already queued.
+ * Records the org's consent to automatic sync and queues a sweep, which enqueues
+ * one Google sync job per pending contact (the job skips what is unchanged).
+ * `queued` is 0: the sweep counts them later, the card shows the progress.
  */
 export async function syncGoogleContactsAction(): Promise<GoogleSyncResult> {
   const ctx = await requireTenantContext();
@@ -93,27 +92,13 @@ export async function syncGoogleContactsAction(): Promise<GoogleSyncResult> {
     return { ok: false, error: "A sincronização já foi iniciada. Aguarde um minuto." };
   }
   lastSyncRequest.set(ctx.organizationId, Date.now());
-  let queued = 0;
   try {
-    let after: string | undefined;
-    do {
-      const page = await listGoogleSyncContactIds(getDb(), ctx, { after, limit: SYNC_PAGE_SIZE });
-      for (const contactId of page.ids) {
-        const { skipped } = await enqueueContactGoogleSync({
-          organizationId: ctx.organizationId,
-          contactId,
-        });
-        if (skipped)
-          throw new DomainError("GOOGLE_QUEUE_UNAVAILABLE", "A fila não está disponível.");
-        queued += 1;
-      }
-      after = page.next ?? undefined;
-    } while (after);
-    return { ok: true, queued };
+    await enableGoogleAutoSync(getDb(), ctx);
+    const { skipped } = await enqueueContactGoogleSweep({ organizationId: ctx.organizationId });
+    if (skipped) throw new DomainError("GOOGLE_QUEUE_UNAVAILABLE", "A fila não está disponível.");
+    return { ok: true, queued: 0 };
   } catch (error) {
-    const message = errorMessage(error, "Não foi possível iniciar a sincronização.");
-    const partial = queued > 0 ? ` ${queued} contatos já foram enfileirados.` : "";
-    return { ok: false, error: `${message}${partial}` };
+    return { ok: false, error: errorMessage(error, "Não foi possível iniciar a sincronização.") };
   } finally {
     revalidatePath(CHANNELS_PATH);
   }

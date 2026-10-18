@@ -7,6 +7,7 @@ import { brainStaleSweepHandler } from "./tasks/brain-stale-sweep";
 import { channelReconcileHandler } from "./tasks/channel-messages-reconcile";
 import { closeResolvedTicketsHandler } from "./tasks/close-resolved-tickets";
 import { contactAvatarHandler } from "./tasks/contact-avatar";
+import { contactGoogleSweepHandler } from "./tasks/contact-google-sweep";
 import { contactGoogleSyncHandler } from "./tasks/contact-google-sync";
 import { generateDraftHandler } from "./tasks/generate-draft";
 import { observerAnalyzeHandler } from "./tasks/observer-analyze";
@@ -29,6 +30,7 @@ export const QUEUES = {
   contactAvatar: "contact-avatar",
   transcribeAudio: "transcribe-audio",
   contactGoogleSync: "contact-google-sync",
+  contactGoogleSweep: "contact-google-sweep",
 } as const;
 
 let boss: PgBoss | undefined;
@@ -129,6 +131,11 @@ async function start(env: ServerEnv): Promise<PgBoss> {
   await instance.work(QUEUES.contactGoogleSync, async (jobs) => {
     for (const job of jobs) await contactGoogleSyncHandler(job.data);
   });
+  await instance.work(QUEUES.contactGoogleSweep, async (jobs) => {
+    for (const job of jobs) await contactGoogleSweepHandler(job.data);
+  });
+  // Mirror contacts the Google account is behind on (orgs that consented only).
+  await instance.schedule(QUEUES.contactGoogleSweep, "*/10 * * * *");
   // Interval-mode observer sweep — the per-org cadence lives in
   // organization_settings.observer_interval_minutes; the cron tick is just
   // the polling granularity.

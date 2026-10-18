@@ -25,7 +25,13 @@ export type GoogleConnectionView = {
   lastError: string | null;
 };
 
-export type GoogleSyncView = { eligible: number; synced: number; lastSyncedAt: string | null };
+export type GoogleSyncView = {
+  eligible: number;
+  synced: number;
+  failed: number;
+  lastSyncedAt: string | null;
+  lastSweepAt: string | null;
+};
 
 const TONES: Record<string, "success" | "warning" | "danger" | "neutral"> = {
   pending: "neutral",
@@ -46,11 +52,24 @@ const FLASH_TOASTS = {
 function SyncSummary({ sync }: { sync: GoogleSyncView }) {
   const t = useTranslations("integrations.google");
   return (
-    <p className="text-ink-muted text-sm" data-testid="google-sync-summary">
-      {t("syncSummary", { eligible: sync.eligible, synced: sync.synced })}
-      {sync.lastSyncedAt &&
-        ` · ${t("lastSynced", { date: new Date(sync.lastSyncedAt).toLocaleString("pt-BR") })}`}
-    </p>
+    <div className="space-y-2">
+      <p className="text-ink-muted text-sm" data-testid="google-sync-summary">
+        {t("syncSummary", { eligible: sync.eligible, synced: sync.synced })}
+        {sync.lastSyncedAt &&
+          ` · ${t("lastSynced", { date: new Date(sync.lastSyncedAt).toLocaleString("pt-BR") })}`}
+        {sync.lastSweepAt &&
+          ` · ${t("lastSweep", { date: new Date(sync.lastSweepAt).toLocaleString("pt-BR") })}`}
+      </p>
+      {sync.failed > 0 && (
+        <p
+          className="bg-warning/15 text-warning rounded-card px-3 py-2 text-sm"
+          role="alert"
+          data-testid="google-sync-failed"
+        >
+          {t("syncFailed", { count: sync.failed })}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -76,7 +95,7 @@ function SyncButton({
         return;
       }
       setQueued(true);
-      toast.success(t("syncQueued", { count: result.queued }));
+      toast.success(t("syncQueued"));
     });
   }
 

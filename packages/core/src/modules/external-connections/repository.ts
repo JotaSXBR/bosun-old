@@ -1,6 +1,6 @@
 import type { DbExecutor } from "@crm/db";
 import { schema } from "@crm/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 
 const { externalConnections } = schema;
 
@@ -52,6 +52,8 @@ export async function upsertConnection(
         accountEmail: null,
         lastCheckedAt: null,
         lastError: null,
+        autoSyncSince: null,
+        lastSweepAt: null,
         updatedAt: new Date(),
       },
     });
@@ -63,7 +65,13 @@ export async function updateConnection(
   values: Partial<
     Pick<
       ExternalConnectionRow,
-      "status" | "bundleEncrypted" | "accountEmail" | "lastCheckedAt" | "lastError"
+      | "status"
+      | "bundleEncrypted"
+      | "accountEmail"
+      | "lastCheckedAt"
+      | "lastError"
+      | "autoSyncSince"
+      | "lastSweepAt"
     >
   >,
 ): Promise<ExternalConnectionRow | undefined> {
@@ -77,4 +85,22 @@ export async function updateConnection(
 
 export async function deleteConnection(executor: DbExecutor, id: string): Promise<void> {
   await executor.delete(externalConnections).where(eq(externalConnections.id, id));
+}
+
+/** Cross-tenant — call inside withServiceAccess. Orgs with a live connection that consented to automatic sync. */
+export async function listAutoSyncOrganizationIds(
+  executor: DbExecutor,
+  provider: string,
+): Promise<string[]> {
+  const rows = await executor
+    .select({ organizationId: externalConnections.organizationId })
+    .from(externalConnections)
+    .where(
+      and(
+        eq(externalConnections.provider, provider),
+        eq(externalConnections.status, "connected"),
+        isNotNull(externalConnections.autoSyncSince),
+      ),
+    );
+  return rows.map((row) => row.organizationId);
 }

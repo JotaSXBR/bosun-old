@@ -43,7 +43,12 @@ export default async function IntegrationsPage({
   const connections = await listChannelConnections(ctx);
   const google = await getGoogleConnectionStatus(ctx);
   const googleSync =
-    google?.status === "connected" ? await getGoogleContactsSyncSummary(ctx) : null;
+    google?.status === "connected"
+      ? {
+          ...(await getGoogleContactsSyncSummary(ctx)),
+          lastSweepAt: google.lastSweepAt?.toISOString() ?? null,
+        }
+      : null;
   const { google: googleFlash } = await searchParams;
   // §7.7 of the IA spec: integrations:manage — was `role !== "agent"`,
   // which wrongly included the read-only viewer.

@@ -26,6 +26,9 @@ export const externalConnections = pgTable(
     accountEmail: text(),
     lastCheckedAt: timestamp({ withTimezone: true }),
     lastError: text(),
+    // Consent for automatic Google sync: set by the first "Sincronizar agora".
+    autoSyncSince: timestamp({ withTimezone: true }),
+    lastSweepAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },

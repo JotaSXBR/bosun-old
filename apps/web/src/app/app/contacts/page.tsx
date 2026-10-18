@@ -8,6 +8,7 @@ import Link from "next/link";
 import { getFormatter, getTranslations } from "next-intl/server";
 
 import { EditContactButton } from "@/components/contact-edit-dialog";
+import { pickProfileMetadata } from "@/lib/contact-profile";
 import type { ContactListRow } from "@/server/services";
 import { listContactsPage, listWahaConnections } from "@/server/services";
 import { requireTenantContext } from "@/server/tenant";
@@ -138,7 +139,7 @@ export default async function ContactsPage({
                         id: contact.id,
                         displayName: contact.displayName,
                         channelUserId: contact.channelUserId,
-                        metadata: contact.metadata,
+                        metadata: pickProfileMetadata(contact.metadata),
                       }}
                     />
                   )}

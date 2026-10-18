@@ -13,7 +13,13 @@ import type { GoogleOAuthClient } from "./google-oauth";
 import { GoogleOAuthError } from "./google-oauth";
 import type { GooglePeopleClient, GooglePerson } from "./google-people";
 import { GooglePeopleError } from "./google-people";
-import { completeGoogleAuthorization, getGoogleStatus, saveGoogleClient } from "./service";
+import { listPendingGoogleSyncContactIds } from "./google-sync-contacts";
+import {
+  completeGoogleAuthorization,
+  enableGoogleAutoSync,
+  getGoogleStatus,
+  saveGoogleClient,
+} from "./service";
 
 const { contacts, externalConnections, organizations } = schema;
 
@@ -87,7 +93,7 @@ const stored = async (contactId: string) => {
   return row!;
 };
 
-async function connect() {
+async function connect(consent = true) {
   const { authUrl } = await saveGoogleClient(
     db,
     ctx,
@@ -100,6 +106,7 @@ async function connect() {
     { code: "code", state: new URL(authUrl).searchParams.get("state")!, redirectUri: REDIRECT },
     oauth,
   );
+  if (consent) await enableGoogleAutoSync(db, ctx);
 }
 
 beforeAll(async () => {
@@ -145,6 +152,42 @@ describe("syncContactToGoogle", () => {
     expect((await stored(id)).metadata.google).toBeUndefined();
   });
 
+  it("sends nothing without auto-sync consent, even with a connected account", async () => {
+    await connect(false);
+    const calls: Calls = [];
+    const id = await newContact({ channelUserId: "5511999990011@c.us", displayName: "Caio" });
+    const outcome = await syncContactToGoogle(
+      db,
+      { organizationId: orgId, contactId: id },
+      { oauth, people: fakePeople({}, calls) },
+    );
+    expect(outcome).toBe("skipped");
+    expect(calls).toEqual([]);
+  });
+
+  it("leaves the pending list after a sync and returns to it after an edit", async () => {
+    await connect();
+    const id = await newContact({ channelUserId: "5511999990012@c.us", displayName: "Dani" });
+    const pending = async () =>
+      (await listPendingGoogleSyncContactIds(db, orgId, { limit: 100 })).ids;
+    expect(await pending()).toContain(id);
+
+    await syncContactToGoogle(
+      db,
+      { organizationId: orgId, contactId: id },
+      { oauth, people: fakePeople() },
+    );
+    expect(await pending()).not.toContain(id);
+
+    await withTenant(db, orgId, (tx) =>
+      tx
+        .update(contacts)
+        .set({ displayName: "Dani Lima", updatedAt: new Date() })
+        .where(eq(contacts.id, id)),
+    );
+    expect(await pending()).toContain(id);
+  });
+
   it("creates, then skips the unchanged payload, then updates after an edit — without touching updated_at", async () => {
     await connect();
     const calls: Calls = [];
@@ -163,6 +206,10 @@ describe("syncContactToGoogle", () => {
     calls.length = 0;
     expect(await run()).toBe("unchanged");
     expect(calls).toEqual([]);
+    // The no-op still stamps the attempt, so the sweep stops treating the contact as pending.
+    const checked = (await stored(id)).metadata.google as Record<string, string>;
+    expect(checked.lastAttemptAt! >= checked.lastSyncedAt!).toBe(true);
+    expect(checked.payloadHash).toBeDefined();
 
     await withTenant(db, orgId, (tx) =>
       tx.update(contacts).set({ displayName: "Bia Souza" }).where(eq(contacts.id, id)),
@@ -263,6 +310,7 @@ describe("syncContactToGoogle", () => {
       resourceName: "people/c1",
       lastError: "rate_limited",
     });
+    expect((await stored(id)).metadata.google).toHaveProperty("lastAttemptAt");
   });
 
   it("marks the connection needs_reauth when the token is revoked, and sends nothing", async () => {
@@ -287,6 +335,7 @@ describe("syncContactToGoogle", () => {
       { code: "c", state: new URL(authUrl).searchParams.get("state")!, redirectUri: REDIRECT },
       expired,
     );
+    await enableGoogleAutoSync(db, ctx);
     const calls: Calls = [];
     const revoked: GoogleOAuthClient = {
       ...oauth,
