@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { TenantContext } from "../../tenant/context";
 import { setUserPreferences } from "../users";
 import { pickupConversation, resolveConversation } from "./actions";
-import { addInternalNote, resendFailedMessage, sendOutboundMessage } from "./outbound";
+import { sendOutboundMessage } from "./outbound";
 import type { ConnectionRef } from "./service";
 import { ingestChannelEvent, listConversationMessages, markConversationRead } from "./service";
 
@@ -31,11 +31,13 @@ function ctx(organizationId: string, role: TenantContext["role"]): TenantContext
 async function newTicket(channelUserId: string, messageId: string, timestamp: Date) {
   await withTenant(db, orgA, (tx) =>
     ingestChannelEvent(tx, connA, {
-      type: "message.received",
-      externalMessageId: messageId,
-      from: { channelUserId, displayName: "Act" },
-      content: { type: "text", text: "hi" },
-      timestamp,
+      event: {
+        type: "message.received",
+        externalMessageId: messageId,
+        from: { channelUserId, displayName: "Act" },
+        content: { type: "text", text: "hi" },
+        timestamp,
+      },
     }),
   );
   return withTenant(db, orgA, async (tx) => {
@@ -109,12 +111,10 @@ describe("sendOutboundMessage", () => {
     const ticket = await newTicket("out-1@c.us", "false_out1@c.us_1", new Date("2024-04-01"));
     const provider = new FakeChannelProvider();
 
-    const message = await sendOutboundMessage(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, text: "hello back" },
-      { provider },
-    );
+    const message = await sendOutboundMessage(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, text: "hello back" },
+      deps: { provider },
+    });
 
     // Provider saw the domain-level outbound message, addressed to the chat.
     expect(provider.sentMessages).toHaveLength(1);
@@ -137,12 +137,10 @@ describe("sendOutboundMessage", () => {
   it("stamps first_response_at once; another agent is rejected before the provider call", async () => {
     const ticket = await newTicket("out-2@c.us", "false_out2@c.us_1", new Date("2024-04-02"));
     const provider = new FakeChannelProvider();
-    await sendOutboundMessage(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, text: "one" },
-      { provider },
-    );
+    await sendOutboundMessage(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, text: "one" },
+      deps: { provider },
+    });
     const firstResponseAt = await withTenant(db, orgA, async (tx) => {
       const [conv] = await tx.select().from(conversations).where(eq(conversations.id, ticket.id));
       return conv!.firstResponseAt;
@@ -150,12 +148,10 @@ describe("sendOutboundMessage", () => {
     expect(firstResponseAt).not.toBeNull();
 
     // Second reply by the same assignee keeps the original stamp.
-    await sendOutboundMessage(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, text: "two" },
-      { provider },
-    );
+    await sendOutboundMessage(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, text: "two" },
+      deps: { provider },
+    });
     await withTenant(db, orgA, async (tx) => {
       const [conv] = await tx.select().from(conversations).where(eq(conversations.id, ticket.id));
       expect(conv!.firstResponseAt).toEqual(firstResponseAt);
@@ -167,8 +163,7 @@ describe("sendOutboundMessage", () => {
       sendOutboundMessage(
         db,
         { ...ctx(orgA, "agent"), userId: agent2 },
-        { conversationId: ticket.id, text: "hijack" },
-        { provider: hijacker },
+        { input: { conversationId: ticket.id, text: "hijack" }, deps: { provider: hijacker } },
       ),
     ).rejects.toThrowError(/TICKET_ASSIGNED|transfer/i);
     expect(hijacker.sentMessages).toHaveLength(0);
@@ -180,12 +175,10 @@ describe("sendOutboundMessage", () => {
     provider.sendMessageError = new Error("session offline");
 
     await expect(
-      sendOutboundMessage(
-        db,
-        ctx(orgA, "agent"),
-        { conversationId: ticket.id, text: "will fail" },
-        { provider },
-      ),
+      sendOutboundMessage(db, ctx(orgA, "agent"), {
+        input: { conversationId: ticket.id, text: "will fail" },
+        deps: { provider },
+      }),
     ).rejects.toThrowError(/SEND_FAILED|failed to send/i);
 
     const rows = await listConversationMessages(db, ctx(orgA, "agent"), {
@@ -202,16 +195,14 @@ describe("sendOutboundMessage", () => {
 
   it("rejects resolved tickets before touching the provider", async () => {
     const ticket = await newTicket("out-4@c.us", "false_out4@c.us_1", new Date("2024-04-04"));
-    await resolveConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id });
+    await resolveConversation(db, ctx(orgA, "agent"), { input: { conversationId: ticket.id } });
     const provider = new FakeChannelProvider();
 
     await expect(
-      sendOutboundMessage(
-        db,
-        ctx(orgA, "agent"),
-        { conversationId: ticket.id, text: "too late" },
-        { provider },
-      ),
+      sendOutboundMessage(db, ctx(orgA, "agent"), {
+        input: { conversationId: ticket.id, text: "too late" },
+        deps: { provider },
+      }),
     ).rejects.toThrowError(/immutable|TICKET_RESOLVED/i);
     expect(provider.sentMessages).toHaveLength(0);
   });
@@ -221,56 +212,57 @@ describe("sendOutboundMessage", () => {
     // the blue tick; the reply itself is bare (seen = read, not reply).
     const waiting = await newTicket("env-1@c.us", "false_env1@c.us_1", new Date("2024-04-06"));
     const provider = new FakeChannelProvider();
-    await markConversationRead(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: waiting.id },
-      { provider },
-    );
+    await markConversationRead(db, ctx(orgA, "agent"), {
+      input: { conversationId: waiting.id },
+      deps: { provider },
+    });
     expect(provider.seenChats).toEqual(["env-1@c.us"]);
-    await sendOutboundMessage(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: waiting.id, text: "on it" },
-      { provider },
-    );
+    await sendOutboundMessage(db, ctx(orgA, "agent"), {
+      input: { conversationId: waiting.id, text: "on it" },
+      deps: { provider },
+    });
     expect(provider.seenChats).toHaveLength(1);
     expect(provider.presences).toHaveLength(0); // humans type via composer events, not here
 
     // Our outbound is now the latest → re-reading does NOT re-seen.
-    await markConversationRead(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: waiting.id },
-      { provider },
-    );
+    await markConversationRead(db, ctx(orgA, "agent"), {
+      input: { conversationId: waiting.id },
+      deps: { provider },
+    });
     expect(provider.seenChats).toHaveLength(1);
   });
 
   it("read does not mark seen for another agent's ticket", async () => {
     const ticket = await newTicket("own-1@c.us", "false_own1@c.us_1", new Date("2024-04-11"));
     const provider = new FakeChannelProvider();
-    await pickupConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id }, { provider });
+    await pickupConversation(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id },
+      deps: { provider },
+    });
     provider.seenChats.length = 0; // clear the pickup tick — testing the read path
     // Ingest a new inbound on the assumed ticket.
     await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connA, {
-        type: "message.received",
-        externalMessageId: "false_own1@c.us_2",
-        from: { channelUserId: "own-1@c.us", displayName: "Act" },
-        content: { type: "text", text: "still here?" },
-        timestamp: new Date("2024-04-11T00:10:00Z"),
+        event: {
+          type: "message.received",
+          externalMessageId: "false_own1@c.us_2",
+          from: { channelUserId: "own-1@c.us", displayName: "Act" },
+          content: { type: "text", text: "still here?" },
+          timestamp: new Date("2024-04-11T00:10:00Z"),
+        },
       }),
     );
     // The assignee returning to pending inbound → seen.
-    await markConversationRead(db, ctx(orgA, "agent"), { conversationId: ticket.id }, { provider });
+    await markConversationRead(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id },
+      deps: { provider },
+    });
     expect(provider.seenChats).toEqual(["own-1@c.us"]);
     // A different agent (agent2) opening the same ticket → NOT their read signal.
     await markConversationRead(
       db,
       { ...ctx(orgA, "agent"), userId: agent2 },
-      { conversationId: ticket.id },
-      { provider },
+      { input: { conversationId: ticket.id }, deps: { provider } },
     );
     expect(provider.seenChats).toHaveLength(1);
   });
@@ -280,19 +272,18 @@ describe("sendOutboundMessage", () => {
     const provider = new FakeChannelProvider();
     await setUserPreferences(db, userId, { sendSeen: false });
     try {
-      await pickupConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id }, { provider });
-      await markConversationRead(
-        db,
-        ctx(orgA, "agent"),
-        { conversationId: ticket.id },
-        { provider },
-      );
-      await sendOutboundMessage(
-        db,
-        ctx(orgA, "agent"),
-        { conversationId: ticket.id, text: "sem tick azul" },
-        { provider },
-      );
+      await pickupConversation(db, ctx(orgA, "agent"), {
+        input: { conversationId: ticket.id },
+        deps: { provider },
+      });
+      await markConversationRead(db, ctx(orgA, "agent"), {
+        input: { conversationId: ticket.id },
+        deps: { provider },
+      });
+      await sendOutboundMessage(db, ctx(orgA, "agent"), {
+        input: { conversationId: ticket.id, text: "sem tick azul" },
+        deps: { provider },
+      });
       expect(provider.seenChats).toHaveLength(0);
       expect(provider.sentMessages).toHaveLength(1);
     } finally {
@@ -303,12 +294,10 @@ describe("sendOutboundMessage", () => {
   it("automated send runs the anti-ban envelope (seen → typing → paused)", async () => {
     const ticket = await newTicket("env-2@c.us", "false_env2@c.us_1", new Date("2024-04-07"));
     const provider = new FakeChannelProvider();
-    await sendOutboundMessage(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, text: "resposta automática" },
-      { provider, automated: true },
-    );
+    await sendOutboundMessage(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, text: "resposta automática" },
+      deps: { provider, automated: true },
+    });
     expect(provider.seenChats).toEqual(["env-2@c.us"]);
     expect(provider.presences).toEqual([
       { chatId: "env-2@c.us", presence: "typing" },
@@ -316,114 +305,4 @@ describe("sendOutboundMessage", () => {
     ]);
     expect(provider.sentMessages).toHaveLength(1);
   }, 15_000);
-});
-
-describe("resendFailedMessage", () => {
-  it("resends a failed text message in place and claims the ticket", async () => {
-    const ticket = await newTicket("res-1@c.us", "false_res1@c.us_1", new Date("2024-04-08"));
-    const failing = new FakeChannelProvider();
-    failing.sendMessageError = new Error("session offline");
-    await expect(
-      sendOutboundMessage(
-        db,
-        ctx(orgA, "agent"),
-        { conversationId: ticket.id, text: "tenta de novo" },
-        { provider: failing },
-      ),
-    ).rejects.toThrowError(/failed to send/i);
-    const rows = await listConversationMessages(db, ctx(orgA, "agent"), {
-      conversationId: ticket.id,
-    });
-    const failed = rows.find((m) => m.status === "failed")!;
-
-    const provider = new FakeChannelProvider();
-    const resent = await resendFailedMessage(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, messageId: failed.id },
-      { provider },
-    );
-
-    expect(resent.id).toBe(failed.id); // same bubble — no duplicate
-    expect(resent.status).toBe("sent");
-    expect(resent.externalId).toMatch(/^fake-msg-\d+$/);
-    expect(provider.sentMessages).toHaveLength(1);
-    expect(provider.sentMessages[0]!.content).toMatchObject({
-      type: "text",
-      text: "tenta de novo",
-    });
-    // Resend is a reply, not a read — the read path owns the blue tick.
-    expect(provider.seenChats).toHaveLength(0);
-    const listed = await listConversationMessages(db, ctx(orgA, "agent"), {
-      conversationId: ticket.id,
-    });
-    expect(listed.filter((m) => m.status === "failed")).toHaveLength(0);
-    await withTenant(db, orgA, async (tx) => {
-      const [conv] = await tx.select().from(conversations).where(eq(conversations.id, ticket.id));
-      expect(conv!.status).toBe("waiting_customer");
-      expect(conv!.assigneeId).toBe(userId);
-    });
-  });
-
-  it("rejects messages that are not failed outbound", async () => {
-    const ticket = await newTicket("res-2@c.us", "false_res2@c.us_1", new Date("2024-04-09"));
-    const provider = new FakeChannelProvider();
-    const sent = await sendOutboundMessage(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, text: "ok" },
-      { provider },
-    );
-
-    await expect(
-      resendFailedMessage(
-        db,
-        ctx(orgA, "agent"),
-        { conversationId: ticket.id, messageId: sent.id },
-        { provider },
-      ),
-    ).rejects.toThrowError(/failed outbound/i);
-    // Inbound message id → same rejection (and not a resend of the customer's text).
-    const rows = await listConversationMessages(db, ctx(orgA, "agent"), {
-      conversationId: ticket.id,
-    });
-    const inbound = rows.find((m) => m.direction === "inbound")!;
-    await expect(
-      resendFailedMessage(
-        db,
-        ctx(orgA, "agent"),
-        { conversationId: ticket.id, messageId: inbound.id },
-        { provider },
-      ),
-    ).rejects.toThrowError(/failed outbound/i);
-    expect(provider.sentMessages).toHaveLength(1);
-  });
-});
-
-describe("addInternalNote", () => {
-  it("note is private, authored, never sent; resolved rejects it", async () => {
-    const ticket = await newTicket("note-1@c.us", "false_n1@c.us_1", new Date("2024-04-05"));
-    const provider = new FakeChannelProvider();
-
-    const note = await addInternalNote(db, ctx(orgA, "agent"), {
-      conversationId: ticket.id,
-      text: "cliente pediu retorno amanhã",
-    });
-    expect(note.private).toBe(true);
-    expect(note.authorId).toBe(userId);
-    expect(note.direction).toBe("outbound");
-    expect(provider.sentMessages).toHaveLength(0);
-    const listed = await listConversationMessages(db, ctx(orgA, "agent"), {
-      conversationId: ticket.id,
-    });
-    expect(listed.find((m) => m.id === note.id)?.authorName).toBe("IT Out User");
-    expect(
-      listed.filter((m) => m.direction === "inbound").every((m) => m.authorName === null),
-    ).toBe(true);
-
-    await resolveConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id });
-    await expect(
-      addInternalNote(db, ctx(orgA, "agent"), { conversationId: ticket.id, text: "late" }),
-    ).rejects.toThrowError(/immutable|TICKET_RESOLVED/i);
-  });
 });

@@ -22,11 +22,13 @@ let connA: ConnectionRef;
 async function newMessage(channelUserId: string, externalId: string, text: string) {
   await withTenant(db, orgA, (tx) =>
     ingestChannelEvent(tx, connA, {
-      type: "message.received",
-      externalMessageId: externalId,
-      from: { channelUserId, displayName: "Evt" },
-      content: { type: "text", text },
-      timestamp: new Date("2024-04-07"),
+      event: {
+        type: "message.received",
+        externalMessageId: externalId,
+        from: { channelUserId, displayName: "Evt" },
+        content: { type: "text", text },
+        timestamp: new Date("2024-04-07"),
+      },
     }),
   );
   return withTenant(db, orgA, async (tx) => {
@@ -79,11 +81,13 @@ describe("message.reaction ingest", () => {
     const react = (emoji: string) =>
       withTenant(db, orgA, (tx) =>
         ingestChannelEvent(tx, connA, {
-          type: "message.reaction",
-          messageExternalId: "false_r1@c.us_1",
-          emoji,
-          actorChannelUserId: "r1@c.us",
-          fromMe: false,
+          event: {
+            type: "message.reaction",
+            messageExternalId: "false_r1@c.us_1",
+            emoji,
+            actorChannelUserId: "r1@c.us",
+            fromMe: false,
+          },
         }),
       );
 
@@ -118,11 +122,13 @@ describe("message.reaction ingest", () => {
     ] as const) {
       await withTenant(db, orgA, (tx) =>
         ingestChannelEvent(tx, connA, {
-          type: "message.reaction",
-          messageExternalId: "false_r2@c.us_1",
-          emoji: "👍",
-          actorChannelUserId: actor,
-          fromMe,
+          event: {
+            type: "message.reaction",
+            messageExternalId: "false_r2@c.us_1",
+            emoji: "👍",
+            actorChannelUserId: actor,
+            fromMe,
+          },
         }),
       );
       void key;
@@ -136,11 +142,13 @@ describe("message.reaction ingest", () => {
   it("ignores reactions to unknown messages", async () => {
     const result = await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connA, {
-        type: "message.reaction",
-        messageExternalId: "false_nope@c.us_x",
-        emoji: "👍",
-        actorChannelUserId: "nope@c.us",
-        fromMe: false,
+        event: {
+          type: "message.reaction",
+          messageExternalId: "false_nope@c.us_x",
+          emoji: "👍",
+          actorChannelUserId: "nope@c.us",
+          fromMe: false,
+        },
       }),
     );
     expect(result).toEqual({ eventType: "message.reaction", messageId: null });
@@ -152,9 +160,11 @@ describe("message.edited ingest", () => {
     const msg = await newMessage("e1@c.us", "false_e1@c.us_1", "original");
     const result = await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connA, {
-        type: "message.edited",
-        messageExternalIds: ["true_e1@c.us_1", "false_e1@c.us_1"],
-        newText: "edited text",
+        event: {
+          type: "message.edited",
+          messageExternalIds: ["true_e1@c.us_1", "false_e1@c.us_1"],
+          newText: "edited text",
+        },
       }),
     );
     expect(result.messageId).toBe(msg.id);
@@ -177,24 +187,28 @@ describe("message.edited ingest", () => {
     const mediaId = "false_me1@c.us_1";
     await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connA, {
-        type: "message.received",
-        externalMessageId: mediaId,
-        from: { channelUserId: "me1@c.us", displayName: "Evt" },
-        content: {
-          type: "media",
-          mediaKind: "image",
-          source: { type: "url", url: "https://waha.internal/media/pic.jpg" },
-          mimeType: "image/jpeg",
-          caption: "old caption",
+        event: {
+          type: "message.received",
+          externalMessageId: mediaId,
+          from: { channelUserId: "me1@c.us", displayName: "Evt" },
+          content: {
+            type: "media",
+            mediaKind: "image",
+            source: { type: "url", url: "https://waha.internal/media/pic.jpg" },
+            mimeType: "image/jpeg",
+            caption: "old caption",
+          },
+          timestamp: new Date("2024-04-07"),
         },
-        timestamp: new Date("2024-04-07"),
       }),
     );
     await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connA, {
-        type: "message.edited",
-        messageExternalIds: [mediaId],
-        newText: "new caption",
+        event: {
+          type: "message.edited",
+          messageExternalIds: [mediaId],
+          newText: "new caption",
+        },
       }),
     );
     const row = await withTenant(db, orgA, async (tx) => {
@@ -213,9 +227,11 @@ describe("message.edited ingest", () => {
     const msg = await newMessage("e2@c.us", "false_e2@c.us_1", "same");
     await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connA, {
-        type: "message.edited",
-        messageExternalIds: ["false_e2@c.us_1"],
-        newText: "same",
+        event: {
+          type: "message.edited",
+          messageExternalIds: ["false_e2@c.us_1"],
+          newText: "same",
+        },
       }),
     );
     const edits = await withTenant(db, orgA, (tx) =>
@@ -235,8 +251,10 @@ describe("message.revoked ingest", () => {
     const msg = await newMessage("v1@c.us", "false_v1@c.us_1", "sigilo");
     const result = await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connA, {
-        type: "message.revoked",
-        messageExternalId: "false_v1@c.us_1",
+        event: {
+          type: "message.revoked",
+          messageExternalId: "false_v1@c.us_1",
+        },
       }),
     );
     expect(result.messageId).toBe(msg.id);
@@ -251,8 +269,10 @@ describe("message.revoked ingest", () => {
     const first = row.revokedAt;
     await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connA, {
-        type: "message.revoked",
-        messageExternalId: "false_v1@c.us_1",
+        event: {
+          type: "message.revoked",
+          messageExternalId: "false_v1@c.us_1",
+        },
       }),
     );
     const replayed = await withTenant(db, orgA, async (tx) => {
@@ -268,10 +288,12 @@ describe("contact.presence ingest", () => {
     await newMessage("p1@c.us", "false_p1@c.us_1", "oi");
     const result = await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connA, {
-        type: "contact.presence",
-        chatId: "p1@c.us",
-        participant: "p1@c.us",
-        presence: "typing",
+        event: {
+          type: "contact.presence",
+          chatId: "p1@c.us",
+          participant: "p1@c.us",
+          presence: "typing",
+        },
       }),
     );
     expect(result).toEqual({ eventType: "contact.presence", messageId: null });
@@ -280,10 +302,12 @@ describe("contact.presence ingest", () => {
   it("drops presence for chats without an active ticket", async () => {
     const result = await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connA, {
-        type: "contact.presence",
-        chatId: "ghost@c.us",
-        participant: null,
-        presence: "recording",
+        event: {
+          type: "contact.presence",
+          chatId: "ghost@c.us",
+          participant: null,
+          presence: "recording",
+        },
       }),
     );
     expect(result.messageId).toBeNull();

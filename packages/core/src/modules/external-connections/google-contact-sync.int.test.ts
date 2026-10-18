@@ -94,18 +94,18 @@ const stored = async (contactId: string) => {
 };
 
 async function connect(consent = true) {
-  const { authUrl } = await saveGoogleClient(
-    db,
-    ctx,
-    { clientId: "client-id-123", clientSecret: "client-secret-456", redirectUri: REDIRECT },
+  const { authUrl } = await saveGoogleClient(db, ctx, {
+    input: { clientId: "client-id-123", clientSecret: "client-secret-456", redirectUri: REDIRECT },
     oauth,
-  );
-  await completeGoogleAuthorization(
-    db,
-    ctx,
-    { code: "code", state: new URL(authUrl).searchParams.get("state")!, redirectUri: REDIRECT },
+  });
+  await completeGoogleAuthorization(db, ctx, {
+    input: {
+      code: "code",
+      state: new URL(authUrl).searchParams.get("state")!,
+      redirectUri: REDIRECT,
+    },
     oauth,
-  );
+  });
   if (consent) await enableGoogleAutoSync(db, ctx);
 }
 
@@ -323,18 +323,22 @@ describe("syncContactToGoogle", () => {
           accountEmail: null,
         }),
     };
-    const { authUrl } = await saveGoogleClient(
-      db,
-      ctx,
-      { clientId: "client-id-123", clientSecret: "client-secret-456", redirectUri: REDIRECT },
-      expired,
-    );
-    await completeGoogleAuthorization(
-      db,
-      ctx,
-      { code: "c", state: new URL(authUrl).searchParams.get("state")!, redirectUri: REDIRECT },
-      expired,
-    );
+    const { authUrl } = await saveGoogleClient(db, ctx, {
+      input: {
+        clientId: "client-id-123",
+        clientSecret: "client-secret-456",
+        redirectUri: REDIRECT,
+      },
+      oauth: expired,
+    });
+    await completeGoogleAuthorization(db, ctx, {
+      input: {
+        code: "c",
+        state: new URL(authUrl).searchParams.get("state")!,
+        redirectUri: REDIRECT,
+      },
+      oauth: expired,
+    });
     await enableGoogleAutoSync(db, ctx);
     const calls: Calls = [];
     const revoked: GoogleOAuthClient = {

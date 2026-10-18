@@ -54,8 +54,7 @@ type StubReply = { status: number; value?: unknown; png?: Buffer };
 function sessionRoute(
   parts: string[],
   method: string,
-  sessionStatus: string,
-  webhookUrl?: string,
+  { sessionStatus, webhookUrl }: { sessionStatus: string; webhookUrl?: string },
 ): StubReply {
   const name = parts[2];
   const sub = parts[3];
@@ -88,14 +87,13 @@ function sessionRoute(
 function stubRoute(
   method: string,
   path: string,
-  sessionStatus: string,
-  webhookUrl?: string,
+  { sessionStatus, webhookUrl }: { sessionStatus: string; webhookUrl?: string },
 ): StubReply {
   const parts = path.split("?")[0]!.split("/").filter(Boolean);
   if (method === "GET" && path.endsWith("/auth/qr")) {
     return { status: 200, png: Buffer.from("89504e47", "hex") };
   }
-  if (parts[1] === "sessions") return sessionRoute(parts, method, sessionStatus, webhookUrl);
+  if (parts[1] === "sessions") return sessionRoute(parts, method, { sessionStatus, webhookUrl });
   if (method === "POST" && parts[2] === "auth" && parts[3] === "request-code") {
     return { status: 200, value: { code: "ABCD-EFGH" } };
   }
@@ -116,7 +114,7 @@ async function startWahaStub(sessionStatus: string): Promise<Stub> {
       const path = req.url ?? "";
       const raw = Buffer.concat(chunks).toString("utf8");
       requests.push({ method, path, body: raw ? (JSON.parse(raw) as unknown) : undefined });
-      const reply = stubRoute(method, path, sessionStatus, state.webhookUrl);
+      const reply = stubRoute(method, path, { sessionStatus, webhookUrl: state.webhookUrl });
       if (reply.png) {
         res.writeHead(reply.status, { "content-type": "image/png" });
         return res.end(reply.png);
@@ -249,10 +247,13 @@ describe("createChannelConnection", () => {
     );
 
   it("meta connection fills app-level secrets from platform_settings", async () => {
-    await setPlatformSetting(db, adminCtx(), "meta", {
-      appSecret: `meta_secret_${Date.now()}`,
-      verifyToken: "meta_verify_it",
-      graphApiVersion: "v99.0",
+    await setPlatformSetting(db, adminCtx(), {
+      group: "meta",
+      input: {
+        appSecret: `meta_secret_${Date.now()}`,
+        verifyToken: "meta_verify_it",
+        graphApiVersion: "v99.0",
+      },
     });
     try {
       const conn = await createChannelConnection(db, ctx("owner"), {
@@ -272,9 +273,12 @@ describe("createChannelConnection", () => {
   });
 
   it("connection-supplied meta secrets win over platform defaults", async () => {
-    await setPlatformSetting(db, adminCtx(), "meta", {
-      appSecret: "platform_secret",
-      verifyToken: "platform_verify",
+    await setPlatformSetting(db, adminCtx(), {
+      group: "meta",
+      input: {
+        appSecret: "platform_secret",
+        verifyToken: "platform_verify",
+      },
     });
     try {
       const conn = await createChannelConnection(db, ctx("owner"), {
@@ -386,7 +390,10 @@ describe("refreshConnectionStatus (WAHA connect)", () => {
 
   it("issues a pairing code for a phone number", async () => {
     const conn = await createWahaConnection(stub.url);
-    const { code } = await requestConnectionPairingCode(db, ctx("owner"), conn.id, "5511999998888");
+    const { code } = await requestConnectionPairingCode(db, ctx("owner"), {
+      id: conn.id,
+      phoneNumber: "5511999998888",
+    });
     expect(code).toBe("ABCD-EFGH");
     const request = stub.requests.find((r) => r.path.endsWith("/auth/request-code"));
     expect(request?.body).toEqual({ phoneNumber: "5511999998888" });

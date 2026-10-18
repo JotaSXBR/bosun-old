@@ -76,7 +76,7 @@ afterAll(async () => {
 describe("platform settings service", () => {
   it("rejects non-platform-admin callers", async () => {
     await expect(
-      setPlatformSetting(db, member(), "ai", { openaiApiKey: "x" }),
+      setPlatformSetting(db, member(), { group: "ai", input: { openaiApiKey: "x" } }),
     ).rejects.toBeInstanceOf(AuthorizationError);
     await expect(listPlatformSettingSummaries(db, member())).rejects.toBeInstanceOf(
       AuthorizationError,
@@ -84,8 +84,11 @@ describe("platform settings service", () => {
   });
 
   it("stores encrypted values — no plaintext reaches the table", async () => {
-    await setPlatformSetting(db, platformAdmin(), "ai", {
-      openaiApiKey: "sk-it-openai-secret",
+    await setPlatformSetting(db, platformAdmin(), {
+      group: "ai",
+      input: {
+        openaiApiKey: "sk-it-openai-secret",
+      },
     });
     const rows = await withPlatformScope(db, (tx) => tx.select().from(schema.platformSettings));
     const row = rows.find((r) => r.key === "ai");
@@ -107,9 +110,12 @@ describe("platform settings service", () => {
   });
 
   it("field-merge preserves secrets left blank on update", async () => {
-    await setPlatformSetting(db, platformAdmin(), "ai", {
-      openaiApiKey: "", // blank = keep stored
-      anthropicApiKey: "sk-it-anthropic",
+    await setPlatformSetting(db, platformAdmin(), {
+      group: "ai",
+      input: {
+        openaiApiKey: "", // blank = keep stored
+        anthropicApiKey: "sk-it-anthropic",
+      },
     });
     const settings = await resolveProductSettings(db);
     expect(settings.ai.openaiApiKey).toBe("sk-it-openai-secret");
@@ -124,14 +130,20 @@ describe("platform settings service", () => {
   });
 
   it("nested smtp fields merge field-level", async () => {
-    await setPlatformSetting(db, platformAdmin(), "email", {
-      provider: "smtp",
-      from: "it@crm.local",
-      smtp: { host: "smtp.example", port: 587, user: "u1", password: "p1", secure: false },
+    await setPlatformSetting(db, platformAdmin(), {
+      group: "email",
+      input: {
+        provider: "smtp",
+        from: "it@crm.local",
+        smtp: { host: "smtp.example", port: 587, user: "u1", password: "p1", secure: false },
+      },
     });
-    await setPlatformSetting(db, platformAdmin(), "email", {
-      provider: "smtp",
-      smtp: { password: "", secure: true }, // blank secret preserved
+    await setPlatformSetting(db, platformAdmin(), {
+      group: "email",
+      input: {
+        provider: "smtp",
+        smtp: { password: "", secure: true }, // blank secret preserved
+      },
     });
     const email = await resolveEmailConfig(db);
     expect(email.provider).toBe("smtp");
@@ -163,7 +175,7 @@ describe("platform settings service", () => {
 
   it("blank non-secret fields clear the stored override back to env", async () => {
     // Stored from the earlier test: smtp config + from = "it@crm.local".
-    await setPlatformSetting(db, platformAdmin(), "email", { from: "" });
+    await setPlatformSetting(db, platformAdmin(), { group: "email", input: { from: "" } });
     const email = await resolveEmailConfig(db);
     expect(email.from).toBe(getServerEnv().email.from);
     expect(email.smtp.host).toBe("smtp.example"); // untouched
@@ -177,7 +189,10 @@ describe("platform settings service", () => {
 
   it("corrupt blobs fall back to env and self-heal on the next save", async () => {
     await withPlatformScope(db, (tx) =>
-      upsertPlatformSettingRow(tx, "ai", "not-a-valid-payload", userId),
+      upsertPlatformSettingRow(tx, "ai", {
+        valueEncrypted: "not-a-valid-payload",
+        updatedByUserId: userId,
+      }),
     );
     const env = getServerEnv();
     const settings = await resolveProductSettings(db);
@@ -187,7 +202,10 @@ describe("platform settings service", () => {
     );
     expect(summary!.secretsSet.openaiApiKey).toBe(Boolean(env.ai.openaiApiKey));
     // The corrupt row is skipped on read — a fresh save starts clean.
-    await setPlatformSetting(db, platformAdmin(), "ai", { openaiApiKey: "sk-it-healed" });
+    await setPlatformSetting(db, platformAdmin(), {
+      group: "ai",
+      input: { openaiApiKey: "sk-it-healed" },
+    });
     expect((await resolveProductSettings(db)).ai.openaiApiKey).toBe("sk-it-healed");
   });
 

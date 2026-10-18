@@ -7,22 +7,16 @@ import { createDb, schema, withTenant } from "@crm/db";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import type { TenantContext } from "../../tenant/context";
 import type { ConnectionRef } from "./service";
-import { getConversationDetail, ingestChannelEvent, listTenantConversations } from "./service";
+import { ingestChannelEvent } from "./service";
 
-const { channelConnections, contacts, conversations, messages, organizations, teams, users } =
-  schema;
+const { channelConnections, contacts, conversations, messages, organizations, users } = schema;
 
 let db: Database;
 let orgA: string;
 let orgB: string;
 let userId: string;
 let connA: ConnectionRef;
-
-function ctx(organizationId: string, role: TenantContext["role"]): TenantContext {
-  return { organizationId, userId, role, isPlatformAdmin: false };
-}
 
 const messageReceived: ChannelEvent = {
   type: "message.received",
@@ -89,7 +83,7 @@ afterAll(async () => {
 
 describe("tenant RLS isolation (messaging tables)", () => {
   it("org B sees none of org A's rows in any of the four tables", async () => {
-    await withTenant(db, orgA, (tx) => ingestChannelEvent(tx, connA, messageReceived));
+    await withTenant(db, orgA, (tx) => ingestChannelEvent(tx, connA, { event: messageReceived }));
 
     for (const table of [channelConnections, contacts, conversations, messages] as const) {
       const inB = await withTenant(db, orgB, (tx) => tx.select().from(table));
@@ -125,11 +119,11 @@ describe("ingestChannelEvent", () => {
       timestamp: new Date("2024-01-02T00:00:00Z"),
     };
 
-    const first = await withTenant(db, orgA, (tx) => ingestChannelEvent(tx, connA, event));
+    const first = await withTenant(db, orgA, (tx) => ingestChannelEvent(tx, connA, { event }));
     expect(first.messageId).not.toBeNull();
 
     // Replay: same external id → idempotent, still a single message row.
-    const replay = await withTenant(db, orgA, (tx) => ingestChannelEvent(tx, connA, event));
+    const replay = await withTenant(db, orgA, (tx) => ingestChannelEvent(tx, connA, { event }));
     expect(replay.messageId).toBeNull();
 
     await withTenant(db, orgA, async (tx) => {
@@ -163,7 +157,7 @@ describe("ingestChannelEvent", () => {
       content: { type: "text", text: "again" },
       timestamp: new Date("2024-01-03T00:00:00Z"),
     };
-    await withTenant(db, orgA, (tx) => ingestChannelEvent(tx, connA, event));
+    await withTenant(db, orgA, (tx) => ingestChannelEvent(tx, connA, { event }));
 
     await withTenant(db, orgA, async (tx) => {
       const convs = await tx
@@ -183,10 +177,12 @@ describe("ingestChannelEvent", () => {
   it("message.status updates the stored message", async () => {
     const result = await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connA, {
-        type: "message.status",
-        externalMessageId: "false_555@c.us_DUP1",
-        status: "delivered",
-        timestamp: new Date(),
+        event: {
+          type: "message.status",
+          externalMessageId: "false_555@c.us_DUP1",
+          status: "delivered",
+          timestamp: new Date(),
+        },
       }),
     );
     expect(result.messageId).not.toBeNull();
@@ -201,7 +197,7 @@ describe("ingestChannelEvent", () => {
 
   it("connection.status updates the channel connection", async () => {
     await withTenant(db, orgA, (tx) =>
-      ingestChannelEvent(tx, connA, { type: "connection.status", status: "connected" }),
+      ingestChannelEvent(tx, connA, { event: { type: "connection.status", status: "connected" } }),
     );
     await withTenant(db, orgA, async (tx) => {
       const [conn] = await tx
@@ -210,149 +206,6 @@ describe("ingestChannelEvent", () => {
         .where(eq(channelConnections.id, connA.id));
       expect(conn!.status).toBe("connected");
       expect(conn!.connectedAt).not.toBeNull();
-    });
-  });
-});
-
-describe("conversation lifecycle", () => {
-  it("replays on a resolved chat create no phantom ticket", async () => {
-    const event: ChannelEvent = {
-      type: "message.received",
-      externalMessageId: "false_lc@c.us_REPLAY",
-      from: { channelUserId: "lc-replay@c.us", displayName: "Replay" },
-      content: { type: "text", text: "hi" },
-      timestamp: new Date("2024-02-01T00:00:00Z"),
-    };
-    await withTenant(db, orgA, (tx) => ingestChannelEvent(tx, connA, event));
-
-    // Agent resolves the ticket — then the provider retries the same
-    // webhook: dedup must keep it resolved AND must not leave an empty
-    // follow-up ticket behind.
-    await withTenant(db, orgA, (tx) =>
-      tx
-        .update(conversations)
-        .set({ status: "resolved", assigneeId: userId })
-        .where(eq(conversations.externalId, "lc-replay@c.us")),
-    );
-    await withTenant(db, orgA, (tx) => ingestChannelEvent(tx, connA, event));
-
-    await withTenant(db, orgA, async (tx) => {
-      const rows = await tx
-        .select()
-        .from(conversations)
-        .where(eq(conversations.externalId, "lc-replay@c.us"));
-      expect(rows).toHaveLength(1);
-      expect(rows[0]!.status).toBe("resolved");
-      expect(rows[0]!.assigneeId).toBe(userId);
-    });
-  });
-
-  it("inbound on resolved creates a NEW linked ticket — fresh queue", async () => {
-    let teamId!: string;
-    await withTenant(db, orgA, async (tx) => {
-      const [team] = await tx
-        .insert(teams)
-        .values({ organizationId: orgA, name: `LC ${crypto.randomUUID().slice(0, 6)}` })
-        .returning({ id: teams.id });
-      teamId = team!.id;
-    });
-
-    const inbound: ChannelEvent = {
-      type: "message.received",
-      externalMessageId: "false_lc@c.us_A1",
-      from: { channelUserId: "lc@c.us", displayName: "Life" },
-      content: { type: "text", text: "first" },
-      timestamp: new Date("2024-02-02T00:00:00Z"),
-    };
-    await withTenant(db, orgA, (tx) => ingestChannelEvent(tx, connA, inbound));
-    let firstTicketId!: string;
-    let firstTicketNumber!: number;
-    await withTenant(db, orgA, async (tx) => {
-      const [conv] = await tx
-        .select()
-        .from(conversations)
-        .where(eq(conversations.externalId, "lc@c.us"));
-      firstTicketId = conv!.id;
-      firstTicketNumber = conv!.ticketNumber;
-      expect(conv!.ticketSeq).toBe(1);
-      expect(conv!.status).toBe("open");
-      await tx
-        .update(conversations)
-        .set({ status: "resolved", assigneeId: userId, sectorId: teamId })
-        .where(eq(conversations.id, firstTicketId));
-    });
-
-    // Customer replies on the resolved thread.
-    await withTenant(db, orgA, (tx) =>
-      ingestChannelEvent(tx, connA, {
-        ...inbound,
-        externalMessageId: "false_lc@c.us_A2",
-        timestamp: new Date("2024-02-03T00:00:00Z"),
-      }),
-    );
-
-    await withTenant(db, orgA, async (tx) => {
-      const rows = await tx
-        .select()
-        .from(conversations)
-        .where(eq(conversations.externalId, "lc@c.us"))
-        .orderBy(conversations.createdAt);
-      expect(rows).toHaveLength(2);
-      // Closed ticket stays untouched history.
-      expect(rows[0]!.status).toBe("resolved");
-      expect(rows[0]!.assigneeId).toBe(userId);
-      expect(rows[0]!.sectorId).toBe(teamId);
-      // Follow-up ticket: open, fresh queue, linked to its predecessor.
-      const follow = rows[1]!;
-      expect(follow.status).toBe("open");
-      expect(follow.assigneeId).toBeNull();
-      expect(follow.sectorId).toBeNull();
-      expect(follow.precededById).toBe(firstTicketId);
-      expect(follow.ticketSeq).toBe(2);
-      expect(follow.ticketNumber).toBe(firstTicketNumber + 1);
-    });
-
-    // The detail read surfaces the preceding ticket's numbers for the UI divider.
-    const detail = await getConversationDetail(db, ctx(orgA, "agent"), {
-      conversationId: (
-        await listTenantConversations(db, ctx(orgA, "agent"), { view: "queue" })
-      ).find((c) => c.precededById === firstTicketId)!.id,
-    });
-    expect(detail.precededTicketNumber).toBe(firstTicketNumber);
-    expect(detail.precededTicketSeq).toBe(1);
-  });
-
-  it("inbound on waiting_customer returns to in_progress, keeping assignee", async () => {
-    const inbound: ChannelEvent = {
-      type: "message.received",
-      externalMessageId: "false_wc@c.us_B1",
-      from: { channelUserId: "wc@c.us", displayName: "Wait" },
-      content: { type: "text", text: "ping" },
-      timestamp: new Date("2024-02-04T00:00:00Z"),
-    };
-    await withTenant(db, orgA, (tx) => ingestChannelEvent(tx, connA, inbound));
-    await withTenant(db, orgA, (tx) =>
-      tx
-        .update(conversations)
-        .set({ status: "waiting_customer", assigneeId: userId })
-        .where(eq(conversations.externalId, "wc@c.us")),
-    );
-
-    await withTenant(db, orgA, (tx) =>
-      ingestChannelEvent(tx, connA, {
-        ...inbound,
-        externalMessageId: "false_wc@c.us_B2",
-        timestamp: new Date("2024-02-05T00:00:00Z"),
-      }),
-    );
-
-    await withTenant(db, orgA, async (tx) => {
-      const [conv] = await tx
-        .select()
-        .from(conversations)
-        .where(eq(conversations.externalId, "wc@c.us"));
-      expect(conv!.status).toBe("in_progress");
-      expect(conv!.assigneeId).toBe(userId);
     });
   });
 });

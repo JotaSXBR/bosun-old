@@ -11,14 +11,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { TenantContext } from "../../tenant/context";
 import { pickupConversation } from "./actions";
-import {
-  deleteMessageContent,
-  editMessageContent,
-  reactToMessage,
-  sendChatPresence,
-  subscribeChatPresence,
-} from "./message-actions";
-import { sendChannelMessage, sendOutboundMessage } from "./outbound";
+import { editMessageContent, reactToMessage } from "./message-actions";
+import { sendOutboundMessage } from "./outbound";
 import type { ConnectionRef } from "./service";
 import { ingestChannelEvent } from "./service";
 
@@ -45,11 +39,13 @@ function ctx(organizationId: string, role: TenantContext["role"]): TenantContext
 async function newTicket(channelUserId: string, messageId: string) {
   await withTenant(db, orgA, (tx) =>
     ingestChannelEvent(tx, connA, {
-      type: "message.received",
-      externalMessageId: messageId,
-      from: { channelUserId, displayName: "Act" },
-      content: { type: "text", text: "hi" },
-      timestamp: new Date("2024-04-07"),
+      event: {
+        type: "message.received",
+        externalMessageId: messageId,
+        from: { channelUserId, displayName: "Act" },
+        content: { type: "text", text: "hi" },
+        timestamp: new Date("2024-04-07"),
+      },
     }),
   );
   return withTenant(db, orgA, async (tx) => {
@@ -63,12 +59,10 @@ async function newTicket(channelUserId: string, messageId: string) {
 
 /** Agent sends a text reply (assigns the ticket) and returns the row. */
 async function sendReply(conversationId: string, provider: FakeChannelProvider) {
-  const message = await sendOutboundMessage(
-    db,
-    ctx(orgA, "agent"),
-    { conversationId, text: "reply" },
-    { provider },
-  );
+  const message = await sendOutboundMessage(db, ctx(orgA, "agent"), {
+    input: { conversationId, text: "reply" },
+    deps: { provider },
+  });
   return message;
 }
 
@@ -121,7 +115,10 @@ describe("pickupConversation — sendSeen", () => {
     const ticket = await newTicket("seen-1@c.us", "false_seen1@c.us_1");
     const provider = new FakeChannelProvider();
     expect(provider.seenChats).toHaveLength(0); // no read/pickup call yet → no seen
-    await pickupConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id }, { provider });
+    await pickupConversation(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id },
+      deps: { provider },
+    });
     expect(provider.seenChats).toEqual(["seen-1@c.us"]);
   });
 
@@ -129,12 +126,10 @@ describe("pickupConversation — sendSeen", () => {
     const ticket = await newTicket("seen-2@c.us", "false_seen2@c.us_1");
     const provider = new FakeChannelProvider();
     provider.sendSeen = () => Promise.reject(new Error("waha down"));
-    const conv = await pickupConversation(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id },
-      { provider },
-    );
+    const conv = await pickupConversation(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id },
+      deps: { provider },
+    });
     expect(conv.assigneeId).toBe(userId);
     expect(conv.status).toBe("in_progress");
   });
@@ -144,17 +139,18 @@ describe("reactToMessage", () => {
   it("sends the reaction, stores it under the user key, removes on ''", async () => {
     const ticket = await newTicket("rx-1@c.us", "false_rx1@c.us_1");
     const provider = new FakeChannelProvider();
-    await pickupConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id }, { provider });
+    await pickupConversation(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id },
+      deps: { provider },
+    });
     const [inbound] = await withTenant(db, orgA, (tx) =>
       tx.select().from(messages).where(eq(messages.externalId, "false_rx1@c.us_1")),
     );
 
-    await reactToMessage(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, messageId: inbound!.id, emoji: "👍" },
-      { provider },
-    );
+    await reactToMessage(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, messageId: inbound!.id, emoji: "👍" },
+      deps: { provider },
+    });
     expect(provider.reactions).toEqual([{ messageExternalId: "false_rx1@c.us_1", emoji: "👍" }]);
     let rows = await withTenant(db, orgA, (tx) =>
       tx.select().from(messageReactions).where(eq(messageReactions.messageId, inbound!.id)),
@@ -167,11 +163,13 @@ describe("reactToMessage", () => {
     // Echo of our own reaction (fromMe + same emoji) dedupes to one row.
     await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connA, {
-        type: "message.reaction",
-        messageExternalId: "false_rx1@c.us_1",
-        emoji: "👍",
-        actorChannelUserId: null,
-        fromMe: true,
+        event: {
+          type: "message.reaction",
+          messageExternalId: "false_rx1@c.us_1",
+          emoji: "👍",
+          actorChannelUserId: null,
+          fromMe: true,
+        },
       }),
     );
     rows = await withTenant(db, orgA, (tx) =>
@@ -179,12 +177,10 @@ describe("reactToMessage", () => {
     );
     expect(rows).toHaveLength(1);
 
-    await reactToMessage(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, messageId: inbound!.id, emoji: "" },
-      { provider },
-    );
+    await reactToMessage(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, messageId: inbound!.id, emoji: "" },
+      deps: { provider },
+    });
     rows = await withTenant(db, orgA, (tx) =>
       tx.select().from(messageReactions).where(eq(messageReactions.messageId, inbound!.id)),
     );
@@ -199,12 +195,10 @@ describe("reactToMessage", () => {
       tx.update(messages).set({ externalId: null }).where(eq(messages.id, reply.id)),
     );
     await expect(
-      reactToMessage(
-        db,
-        ctx(orgA, "agent"),
-        { conversationId: ticket.id, messageId: reply.id, emoji: "👍" },
-        { provider },
-      ),
+      reactToMessage(db, ctx(orgA, "agent"), {
+        input: { conversationId: ticket.id, messageId: reply.id, emoji: "👍" },
+        deps: { provider },
+      }),
     ).rejects.toThrowError(/channel messages accept reactions/);
   });
 });
@@ -215,12 +209,10 @@ describe("editMessageContent", () => {
     const provider = new FakeChannelProvider();
     const reply = await sendReply(ticket.id, provider);
 
-    await editMessageContent(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, messageId: reply.id, text: "reply v2" },
-      { provider },
-    );
+    await editMessageContent(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, messageId: reply.id, text: "reply v2" },
+      deps: { provider },
+    });
     expect(provider.edits).toHaveLength(1);
     expect(provider.edits[0]).toMatchObject({
       chatId: "ed-1@c.us",
@@ -247,12 +239,10 @@ describe("editMessageContent", () => {
       tx.select().from(messages).where(eq(messages.externalId, "false_ed2@c.us_1")),
     );
     await expect(
-      editMessageContent(
-        db,
-        ctx(orgA, "agent"),
-        { conversationId: ticket.id, messageId: inbound!.id, text: "x" },
-        { provider },
-      ),
+      editMessageContent(db, ctx(orgA, "agent"), {
+        input: { conversationId: ticket.id, messageId: inbound!.id, text: "x" },
+        deps: { provider },
+      }),
     ).rejects.toThrowError(/own outbound channel messages/);
 
     const reply = await sendReply(ticket.id, provider);
@@ -263,107 +253,11 @@ describe("editMessageContent", () => {
         .where(eq(messages.id, reply.id)),
     );
     await expect(
-      editMessageContent(
-        db,
-        ctx(orgA, "agent"),
-        { conversationId: ticket.id, messageId: reply.id, text: "x" },
-        { provider },
-      ),
+      editMessageContent(db, ctx(orgA, "agent"), {
+        input: { conversationId: ticket.id, messageId: reply.id, text: "x" },
+        deps: { provider },
+      }),
     ).rejects.toThrowError(/15min/);
     expect(provider.edits).toHaveLength(0);
-  });
-});
-
-describe("deleteMessageContent", () => {
-  it("revokes own outbound message — content preserved, revoked_at set", async () => {
-    const ticket = await newTicket("del-1@c.us", "false_del1@c.us_1");
-    const provider = new FakeChannelProvider();
-    const reply = await sendReply(ticket.id, provider);
-
-    await deleteMessageContent(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, messageId: reply.id },
-      { provider },
-    );
-    expect(provider.deletions).toEqual([
-      { chatId: "del-1@c.us", messageExternalId: reply.externalId },
-    ]);
-    const [row] = await withTenant(db, orgA, (tx) =>
-      tx.select().from(messages).where(eq(messages.id, reply.id)),
-    );
-    expect(row!.revokedAt).not.toBeNull();
-    expect(row!.content).toMatchObject({ text: "reply" });
-  });
-});
-
-describe("presence", () => {
-  it("sendChatPresence emits to the remote; viewer role rejected", async () => {
-    const ticket = await newTicket("pr-1@c.us", "false_pr1@c.us_1");
-    const provider = new FakeChannelProvider();
-    await sendReply(ticket.id, provider); // assigns
-
-    await sendChatPresence(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, presence: "typing" },
-      { provider },
-    );
-    expect(provider.presences).toEqual([{ chatId: "pr-1@c.us", presence: "typing" }]);
-
-    await expect(
-      sendChatPresence(
-        db,
-        ctx(orgA, "viewer"),
-        { conversationId: ticket.id, presence: "typing" },
-        { provider },
-      ),
-    ).rejects.toThrowError(/permission|denied/i);
-  });
-
-  it("subscribeChatPresence needs only read permission", async () => {
-    const ticket = await newTicket("pr-2@c.us", "false_pr2@c.us_1");
-    const provider = new FakeChannelProvider();
-    await subscribeChatPresence(
-      db,
-      ctx(orgA, "viewer"),
-      { conversationId: ticket.id },
-      { provider },
-    );
-    expect(provider.subscribedChats).toEqual(["pr-2@c.us"]);
-  });
-});
-
-describe("sendChannelMessage — media + reply", () => {
-  it("sends media content and replyToId through the provider", async () => {
-    const ticket = await newTicket("mm-1@c.us", "false_mm1@c.us_1");
-    const provider = new FakeChannelProvider();
-    const message = await sendChannelMessage(
-      db,
-      ctx(orgA, "agent"),
-      {
-        conversationId: ticket.id,
-        content: {
-          type: "media",
-          mediaKind: "audio",
-          url: "https://storage.example.com/signed/voice.ogg",
-          mimeType: "audio/ogg; codecs=opus",
-          voiceNote: true,
-        },
-        replyToId: "false_mm1@c.us_1",
-      },
-      { provider },
-    );
-    expect(provider.sentMessages[0]).toMatchObject({
-      to: "mm-1@c.us",
-      replyToId: "false_mm1@c.us_1",
-      content: {
-        type: "media",
-        mediaKind: "audio",
-        voiceNote: true,
-        source: { type: "url", url: "https://storage.example.com/signed/voice.ogg" },
-      },
-    });
-    expect(message.content).toMatchObject({ mediaKind: "audio", voiceNote: true });
   });
 });

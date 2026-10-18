@@ -45,11 +45,13 @@ function ctx(organizationId: string, role: TenantContext["role"]): TenantContext
 async function newTicket(channelUserId: string, messageId: string, timestamp: Date) {
   await withTenant(db, orgA, (tx) =>
     ingestChannelEvent(tx, connA, {
-      type: "message.received",
-      externalMessageId: messageId,
-      from: { channelUserId, displayName: "Act" },
-      content: { type: "text", text: "hi" },
-      timestamp,
+      event: {
+        type: "message.received",
+        externalMessageId: messageId,
+        from: { channelUserId, displayName: "Act" },
+        content: { type: "text", text: "hi" },
+        timestamp,
+      },
     }),
   );
   return withTenant(db, orgA, async (tx) => {
@@ -124,7 +126,9 @@ describe("ticket actions", () => {
   it("pickup claims the ticket for the acting agent", async () => {
     const ticket = await newTicket("act-1@c.us", "false_act1@c.us_1", new Date("2024-03-01"));
     const updated = await pickupConversation(db, ctx(orgA, "agent"), {
-      conversationId: ticket.id,
+      input: {
+        conversationId: ticket.id,
+      },
     });
     expect(updated.status).toBe("in_progress");
     expect(updated.assigneeId).toBe(userId);
@@ -142,14 +146,16 @@ describe("ticket actions", () => {
     });
     // A second agent can't silently take over — ownership changes via transfer.
     await expect(
-      pickupConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id }),
+      pickupConversation(db, ctx(orgA, "agent"), { input: { conversationId: ticket.id } }),
     ).rejects.toThrowError(/TICKET_ASSIGNED|transfer/i);
     // The assignee re-picking is idempotent, not a takeover.
     const same = await pickupConversation(
       db,
       { ...ctx(orgA, "agent"), userId: agent2 },
       {
-        conversationId: ticket.id,
+        input: {
+          conversationId: ticket.id,
+        },
       },
     );
     expect(same.assigneeId).toBe(agent2);
@@ -216,15 +222,22 @@ describe("ticket actions", () => {
   it("resolve is terminal: sets resolved_at and rejects further actions", async () => {
     const ticket = await newTicket("act-4@c.us", "false_act4@c.us_1", new Date("2024-03-04"));
     const resolved = await resolveConversation(db, ctx(orgA, "agent"), {
-      conversationId: ticket.id,
+      input: {
+        conversationId: ticket.id,
+      },
     });
     expect(resolved.status).toBe("resolved");
     expect(resolved.resolvedAt).not.toBeNull();
 
-    for (const action of [pickupConversation, setConversationWaiting, setConversationInProgress]) {
-      await expect(
-        action(db, ctx(orgA, "agent"), { conversationId: ticket.id }),
-      ).rejects.toThrowError(/immutable|TICKET_RESOLVED/i);
+    for (const action of [
+      (input: { conversationId: string }) => pickupConversation(db, ctx(orgA, "agent"), { input }),
+      (input: { conversationId: string }) => setConversationWaiting(db, ctx(orgA, "agent"), input),
+      (input: { conversationId: string }) =>
+        setConversationInProgress(db, ctx(orgA, "agent"), input),
+    ]) {
+      await expect(action({ conversationId: ticket.id })).rejects.toThrowError(
+        /immutable|TICKET_RESOLVED/i,
+      );
     }
   });
 
@@ -243,10 +256,10 @@ describe("ticket actions", () => {
   it("viewer is read-only — write actions throw AuthorizationError", async () => {
     const ticket = await newTicket("act-6@c.us", "false_act6@c.us_1", new Date("2024-03-06"));
     await expect(
-      pickupConversation(db, ctx(orgA, "viewer"), { conversationId: ticket.id }),
+      pickupConversation(db, ctx(orgA, "viewer"), { input: { conversationId: ticket.id } }),
     ).rejects.toThrowError(AuthorizationError);
     await expect(
-      resolveConversation(db, ctx(orgA, "viewer"), { conversationId: ticket.id }),
+      resolveConversation(db, ctx(orgA, "viewer"), { input: { conversationId: ticket.id } }),
     ).rejects.toThrowError(AuthorizationError);
   });
 });
@@ -255,11 +268,13 @@ describe("inbox views", () => {
   it("queue = open+unassigned, oldest waiting first; mine/resolved filter", async () => {
     const older = await withTenant(db, orgA, async (tx) => {
       await ingestChannelEvent(tx, connA, {
-        type: "message.received",
-        externalMessageId: "false_q1@c.us_1",
-        from: { channelUserId: "q-1@c.us", displayName: "Q1" },
-        content: { type: "text", text: "hi" },
-        timestamp: new Date("2024-03-10T00:00:00Z"),
+        event: {
+          type: "message.received",
+          externalMessageId: "false_q1@c.us_1",
+          from: { channelUserId: "q-1@c.us", displayName: "Q1" },
+          content: { type: "text", text: "hi" },
+          timestamp: new Date("2024-03-10T00:00:00Z"),
+        },
       });
       const [c] = await tx
         .select()
@@ -269,11 +284,13 @@ describe("inbox views", () => {
     });
     const claimed = await withTenant(db, orgA, async (tx) => {
       await ingestChannelEvent(tx, connA, {
-        type: "message.received",
-        externalMessageId: "false_q2@c.us_1",
-        from: { channelUserId: "q-2@c.us", displayName: "Q2" },
-        content: { type: "text", text: "hi" },
-        timestamp: new Date("2024-03-11T00:00:00Z"),
+        event: {
+          type: "message.received",
+          externalMessageId: "false_q2@c.us_1",
+          from: { channelUserId: "q-2@c.us", displayName: "Q2" },
+          content: { type: "text", text: "hi" },
+          timestamp: new Date("2024-03-11T00:00:00Z"),
+        },
       });
       const [c] = await tx
         .select()
@@ -281,7 +298,7 @@ describe("inbox views", () => {
         .where(eq(conversations.externalId, "q-2@c.us"));
       return c!;
     });
-    await pickupConversation(db, ctx(orgA, "agent"), { conversationId: claimed.id });
+    await pickupConversation(db, ctx(orgA, "agent"), { input: { conversationId: claimed.id } });
 
     const queue = await listTenantConversations(db, ctx(orgA, "agent"), { view: "queue" });
     expect(queue.every((c) => c.status === "open" && c.assigneeId === null)).toBe(true);
@@ -306,7 +323,9 @@ describe("resumeTicket", () => {
   it("resumeTicket creates an in_progress follow-up assigned to the caller", async () => {
     const ticket = await newTicket("res-1@c.us", "false_r1@c.us_1", new Date("2024-04-06"));
     const resolved = await resolveConversation(db, ctx(orgA, "agent"), {
-      conversationId: ticket.id,
+      input: {
+        conversationId: ticket.id,
+      },
     });
 
     const follow = await resumeTicket(db, ctx(orgA, "agent"), { conversationId: resolved.id });

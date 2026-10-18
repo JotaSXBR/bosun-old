@@ -121,12 +121,12 @@ describe("macros service", () => {
 
   it("update and delete round-trip", async () => {
     const m = await createMacro(db, adminA(), { name: "editavel", content: "v1" });
-    const updated = await updateMacro(db, adminA(), m.id, { content: "v2" });
+    const updated = await updateMacro(db, adminA(), { macroId: m.id, input: { content: "v2" } });
     expect(updated.content).toBe("v2");
     await deleteMacro(db, adminA(), m.id);
-    await expect(updateMacro(db, adminA(), m.id, { content: "v3" })).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    await expect(
+      updateMacro(db, adminA(), { macroId: m.id, input: { content: "v3" } }),
+    ).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it("macros are tenant-isolated", async () => {

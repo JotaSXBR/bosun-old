@@ -45,22 +45,22 @@ async function configureOrg(org: string) {
 async function inboundMedia(
   org: string,
   conn: ConnectionRef,
-  channelUserId: string,
-  msgId: string,
-  url: string,
+  { channelUserId, msgId, url }: { channelUserId: string; msgId: string; url: string },
 ) {
   const result = await withTenant(db, org, (tx) =>
     ingestChannelEvent(tx, conn, {
-      type: "message.received",
-      externalMessageId: msgId,
-      from: { channelUserId, displayName: "Cust" },
-      content: {
-        type: "media",
-        mediaKind: "image",
-        mimeType: "image/webp",
-        source: { type: "url", url },
+      event: {
+        type: "message.received",
+        externalMessageId: msgId,
+        from: { channelUserId, displayName: "Cust" },
+        content: {
+          type: "media",
+          mediaKind: "image",
+          mimeType: "image/webp",
+          source: { type: "url", url },
+        },
+        timestamp: new Date("2024-04-07"),
       },
-      timestamp: new Date("2024-04-07"),
     }),
   );
   const [conv] = await withTenant(db, org, (tx) =>
@@ -136,13 +136,11 @@ afterAll(async () => {
 
 describe("maybeSendUnsupportedMediaReply", () => {
   it("sends the org template once per ticket and dedups further flags", async () => {
-    const { conv, messageId } = await inboundMedia(
-      orgA,
-      connA,
-      "um-1@c.us",
-      "false_um1@c.us_1",
-      "",
-    );
+    const { conv, messageId } = await inboundMedia(orgA, connA, {
+      channelUserId: "um-1@c.us",
+      msgId: "false_um1@c.us_1",
+      url: "",
+    });
     const provider = new FakeChannelProvider();
 
     const first = await maybeSendUnsupportedMediaReply(
@@ -156,7 +154,11 @@ describe("maybeSendUnsupportedMediaReply", () => {
     expect(provider.sentMessages[0]!.content).toEqual({ type: "text", text: TEMPLATE });
 
     // A second unsupported media on the SAME ticket must not re-send.
-    const againMsg = await inboundMedia(orgA, connA, "um-1@c.us", "false_um1@c.us_2", "");
+    const againMsg = await inboundMedia(orgA, connA, {
+      channelUserId: "um-1@c.us",
+      msgId: "false_um1@c.us_2",
+      url: "",
+    });
     const again = await maybeSendUnsupportedMediaReply(
       db,
       { organizationId: orgA, conversationId: conv.id, messageId: againMsg.messageId },
@@ -180,13 +182,11 @@ describe("maybeSendUnsupportedMediaReply", () => {
 
   it("stays silent when the message has a fetchable source or no template", async () => {
     // Supported media (url set) → no flag → no reply even when configured.
-    const supported = await inboundMedia(
-      orgA,
-      connA,
-      "um-2@c.us",
-      "false_um2@c.us_1",
-      "https://waha.local/api/files/x.webp",
-    );
+    const supported = await inboundMedia(orgA, connA, {
+      channelUserId: "um-2@c.us",
+      msgId: "false_um2@c.us_1",
+      url: "https://waha.local/api/files/x.webp",
+    });
     const provider = new FakeChannelProvider();
     const noFlag = await maybeSendUnsupportedMediaReply(
       db,
@@ -197,7 +197,11 @@ describe("maybeSendUnsupportedMediaReply", () => {
     expect(provider.sentMessages).toHaveLength(0);
 
     // Org B never set the template → hard no.
-    const flaggedB = await inboundMedia(orgB, connB, "um-3@c.us", "false_um3@c.us_1", "");
+    const flaggedB = await inboundMedia(orgB, connB, {
+      channelUserId: "um-3@c.us",
+      msgId: "false_um3@c.us_1",
+      url: "",
+    });
     const noCfg = await maybeSendUnsupportedMediaReply(
       db,
       { organizationId: orgB, conversationId: flaggedB.conv.id, messageId: flaggedB.messageId },
@@ -209,13 +213,11 @@ describe("maybeSendUnsupportedMediaReply", () => {
   });
 
   it("provider failure marks the marker failed and a retry sends again", async () => {
-    const { conv, messageId } = await inboundMedia(
-      orgA,
-      connA,
-      "um-4@c.us",
-      "false_um4@c.us_1",
-      "",
-    );
+    const { conv, messageId } = await inboundMedia(orgA, connA, {
+      channelUserId: "um-4@c.us",
+      msgId: "false_um4@c.us_1",
+      url: "",
+    });
     const failing = new FakeChannelProvider();
     failing.sendMessageError = new Error("provider down");
 

@@ -38,11 +38,13 @@ function ctx(organizationId: string, role: TenantContext["role"]): TenantContext
 async function newTicket(channelUserId: string, messageId: string, org: string = orgA) {
   await withTenant(db, org, (tx) =>
     ingestChannelEvent(tx, connA, {
-      type: "message.received",
-      externalMessageId: messageId,
-      from: { channelUserId, displayName: "Sweep" },
-      content: { type: "text", text: "hi" },
-      timestamp: new Date("2024-04-07"),
+      event: {
+        type: "message.received",
+        externalMessageId: messageId,
+        from: { channelUserId, displayName: "Sweep" },
+        content: { type: "text", text: "hi" },
+        timestamp: new Date("2024-04-07"),
+      },
     }),
   );
   return withTenant(db, org, async (tx) => {
@@ -59,7 +61,7 @@ async function newTicket(channelUserId: string, messageId: string, org: string =
 /** Resolves a ticket then backdates resolved_at to control the window age. */
 async function resolvedTicket(channelUserId: string, resolvedHoursAgo: number, org = orgA) {
   const ticket = await newTicket(channelUserId, `false_${channelUserId}_1`, org);
-  await resolveConversation(db, ctx(org, "agent"), { conversationId: ticket.id });
+  await resolveConversation(db, ctx(org, "agent"), { input: { conversationId: ticket.id } });
   await withTenant(db, org, (tx) =>
     tx
       .update(conversations)
@@ -165,11 +167,13 @@ describe("closeExpiredResolvedTickets", () => {
     });
     const ticketB = await withTenant(db, orgB, async (tx) => {
       await ingestChannelEvent(tx, connB, {
-        type: "message.received",
-        externalMessageId: "false_swb@c.us_1",
-        from: { channelUserId: "swb@c.us", displayName: "Sweep B" },
-        content: { type: "text", text: "hi" },
-        timestamp: new Date("2024-04-07"),
+        event: {
+          type: "message.received",
+          externalMessageId: "false_swb@c.us_1",
+          from: { channelUserId: "swb@c.us", displayName: "Sweep B" },
+          content: { type: "text", text: "hi" },
+          timestamp: new Date("2024-04-07"),
+        },
       });
       const [conv] = await tx
         .select()
@@ -178,7 +182,7 @@ describe("closeExpiredResolvedTickets", () => {
         .limit(1);
       return conv!.id;
     });
-    await resolveConversation(db, ctx(orgB, "agent"), { conversationId: ticketB });
+    await resolveConversation(db, ctx(orgB, "agent"), { input: { conversationId: ticketB } });
     await withTenant(db, orgB, (tx) =>
       tx
         .update(conversations)
@@ -224,14 +228,14 @@ describe("closed ticket semantics", () => {
     await closeExpiredResolvedTickets(db);
 
     await expect(
-      pickupConversation(db, ctx(orgA, "agent"), { conversationId: ticket }),
+      pickupConversation(db, ctx(orgA, "agent"), { input: { conversationId: ticket } }),
     ).rejects.toThrowError(/TICKET_RESOLVED|immutable/i);
   });
 
   it("views: `mine` excludes closed; `resolved` view includes it", async () => {
     const ticket = await newTicket("sw-7@c.us", "false_sw7@c.us_1");
-    await pickupConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id });
-    await resolveConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id });
+    await pickupConversation(db, ctx(orgA, "agent"), { input: { conversationId: ticket.id } });
+    await resolveConversation(db, ctx(orgA, "agent"), { input: { conversationId: ticket.id } });
     await withTenant(db, orgA, (tx) =>
       tx
         .update(conversations)
