@@ -102,7 +102,9 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
 
-const serverEnvSchema = envSchema.transform((env) => ({
+type RawEnv = z.output<typeof envSchema>;
+
+const coreEnv = (env: RawEnv) => ({
   nodeEnv: env.NODE_ENV,
   appUrl: env.APP_URL,
   logLevel: env.LOG_LEVEL,
@@ -120,6 +122,9 @@ const serverEnvSchema = envSchema.transform((env) => ({
     openaiApiKey: env.OPENAI_API_KEY,
     anthropicApiKey: env.ANTHROPIC_API_KEY,
   },
+});
+
+const providersEnv = (env: RawEnv) => ({
   whatsapp: {
     waha: {
       baseUrl: env.WAHA_BASE_URL,
@@ -145,6 +150,9 @@ const serverEnvSchema = envSchema.transform((env) => ({
     secretAccessKey: env.STORAGE_S3_SECRET_ACCESS_KEY,
     forcePathStyle: env.STORAGE_S3_FORCE_PATH_STYLE,
   },
+});
+
+const servicesEnv = (env: RawEnv) => ({
   billing: {
     asaasApiKey: env.ASAAS_API_KEY,
     asaasEnvironment: env.ASAAS_ENVIRONMENT,
@@ -167,6 +175,12 @@ const serverEnvSchema = envSchema.transform((env) => ({
     otelEndpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT,
     otelServiceName: env.OTEL_SERVICE_NAME,
   },
+});
+
+const serverEnvSchema = envSchema.transform((env) => ({
+  ...coreEnv(env),
+  ...providersEnv(env),
+  ...servicesEnv(env),
 }));
 
 export type ServerEnv = z.output<typeof serverEnvSchema>;

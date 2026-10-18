@@ -29,27 +29,30 @@ import {
   wahaSendSeen,
   wahaSubscribePresence,
 } from "./waha-actions";
+import { isAnonymousFetchable, mediaFilePaths, resolveMediaUrl } from "./waha-media";
 import type { FetchLike, WahaConfig } from "./waha-payloads";
 import {
-  mapSessionStatus,
-  WAHA_WEBHOOK_EVENTS,
-  WAHA_WEBHOOK_RETRIES,
   wahaAckToEvents,
   wahaChatSchema,
   wahaEditedToEvents,
-  wahaMeSchema,
   wahaMessageSchema,
   wahaMessageToEvents,
-  wahaPairingCodeSchema,
   wahaPresenceToEvents,
   wahaReactionToEvents,
   wahaRevokedToEvents,
-  wahaServerVersionSchema,
-  wahaSessionSchema,
   wahaSessionStatusToEvents,
   wahaToInbound,
   wahaWebhookSchema,
 } from "./waha-payloads";
+import {
+  type SessionCtx,
+  wahaConnect,
+  wahaGetConnectionStatus,
+  wahaGetServerInfo,
+  wahaGetSessionInfo,
+  wahaRequestPairingCode,
+  wahaSessionCommand,
+} from "./waha-session";
 
 export type { FetchLike, WahaConfig } from "./waha-payloads";
 export { WAHA_WEBHOOK_EVENTS, WAHA_WEBHOOK_RETRIES } from "./waha-payloads";
@@ -73,185 +76,38 @@ export class WahaChannelProvider implements ChannelProvider {
     return { "X-Api-Key": this.config.apiKey, ...extra };
   }
 
-  private async getSession(): Promise<z.infer<typeof wahaSessionSchema> | null> {
-    const res = await this.request(`/api/sessions/${this.config.session}`);
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`WAHA get session failed: HTTP ${res.status}`);
-    return wahaSessionSchema.parse(await res.json());
+  private get session(): SessionCtx {
+    return { config: this.config, request: this.request };
   }
 
-  /**
-   * Session `config` for create/update — the per-connection webhook with
-   * HMAC + retries. Undefined when no webhookUrl is configured (never send
-   * an empty config: PUT is a full replace and would wipe the session's
-   * webhooks).
-   */
-  private webhookSessionConfig(): { webhooks: Record<string, unknown>[] } | undefined {
-    if (!this.config.webhookUrl) return undefined;
-    const webhook: Record<string, unknown> = {
-      url: this.config.webhookUrl,
-      events: [...WAHA_WEBHOOK_EVENTS],
-      retries: { ...WAHA_WEBHOOK_RETRIES },
-    };
-    if (this.config.webhookHmacKey) {
-      webhook.hmac = { key: this.config.webhookHmacKey };
-    }
-    return { webhooks: [webhook] };
+  connect(): Promise<ConnectResult> {
+    return wahaConnect(this.session);
   }
 
-  /** Idempotent config write — PUT is a FULL replace, send the whole config. */
-  private async writeSessionConfig(config: { webhooks: Record<string, unknown>[] }): Promise<void> {
-    const res = await this.request(`/api/sessions/${this.config.session}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: this.config.session, config }),
-    });
-    if (!res.ok) {
-      throw new Error(`WAHA update session config failed: HTTP ${res.status}`);
-    }
+  disconnect(): Promise<void> {
+    return wahaSessionCommand(this.session, "stop");
   }
 
-  async connect(): Promise<ConnectResult> {
-    const existing = await this.getSession();
-    const config = this.webhookSessionConfig();
-    if (!existing) await this.createSession(config);
-    else await this.updateSession(existing, config);
-
-    const session = await this.getSession();
-    const status = mapSessionStatus(session?.status ?? "FAILED");
-    const result: ConnectResult = { status };
-    if (session?.status === "SCAN_QR_CODE") {
-      result.qrCode = await this.getQrCode();
-    }
-    return result;
-  }
-
-  private async createSession(
-    config: { webhooks: Record<string, unknown>[] } | undefined,
-  ): Promise<void> {
-    const created = await this.request(`/api/sessions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: this.config.session,
-        start: true,
-        ...(config ? { config } : {}),
-      }),
-    });
-    if (!created.ok) {
-      throw new Error(`WAHA create session failed: HTTP ${created.status}`);
-    }
-  }
-
-  private async updateSession(
-    existing: z.infer<typeof wahaSessionSchema>,
-    config: { webhooks: Record<string, unknown>[] } | undefined,
-  ): Promise<void> {
-    // A config PUT restarts the session — rewriting it on every connect
-    // poll keeps the session bouncing STARTING↔SCAN_QR_CODE and the QR
-    // is never fetched. Skip when our webhook is already registered or
-    // the session is mid-pairing (config necessarily got there with it).
-    const webhookRegistered = existing.config?.webhooks?.some(
-      (hook) => hook.url === this.config.webhookUrl,
-    );
-    if (config && !webhookRegistered && existing.status !== "SCAN_QR_CODE") {
-      await this.writeSessionConfig(config);
-    }
-    if (existing.status === "STOPPED" || existing.status === "FAILED") {
-      const started = await this.request(`/api/sessions/${this.config.session}/start`, {
-        method: "POST",
-      });
-      if (!started.ok) {
-        throw new Error(`WAHA start session failed: HTTP ${started.status}`);
-      }
-    }
-  }
-
-  private async getQrCode(): Promise<ConnectResult["qrCode"]> {
-    const res = await this.request(`/api/${this.config.session}/auth/qr`, {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) return undefined;
-    const contentType = res.headers.get("content-type") ?? "";
-    if (contentType.includes("application/json")) {
-      const body = z
-        .looseObject({ mimetype: z.string().optional(), data: z.string().optional() })
-        .parse(await res.json());
-      if (!body.data) return undefined;
-      return { mimeType: body.mimetype ?? "image/png", data: body.data };
-    }
-    const buffer = await res.arrayBuffer();
-    return {
-      mimeType: contentType || "image/png",
-      data: Buffer.from(buffer).toString("base64"),
-    };
-  }
-
-  async disconnect(): Promise<void> {
-    const res = await this.request(`/api/sessions/${this.config.session}/stop`, {
-      method: "POST",
-    });
-    if (!res.ok && res.status !== 404) {
-      throw new Error(`WAHA stop session failed: HTTP ${res.status}`);
-    }
-  }
-
-  async restart(): Promise<void> {
-    const res = await this.request(`/api/sessions/${this.config.session}/restart`, {
-      method: "POST",
-    });
-    if (!res.ok && res.status !== 404) {
-      throw new Error(`WAHA restart session failed: HTTP ${res.status}`);
-    }
+  restart(): Promise<void> {
+    return wahaSessionCommand(this.session, "restart");
   }
 
   /** Unpairs the device — next connect() will need QR/pairing code again. */
-  async logout(): Promise<void> {
-    const res = await this.request(`/api/sessions/${this.config.session}/logout`, {
-      method: "POST",
-    });
-    if (!res.ok && res.status !== 404) {
-      throw new Error(`WAHA logout session failed: HTTP ${res.status}`);
-    }
+  logout(): Promise<void> {
+    return wahaSessionCommand(this.session, "logout");
   }
 
   /** WhatsApp "connect with phone number" — the code the user types in the app. */
-  async requestPairingCode(phoneNumber: string): Promise<{ code: string }> {
-    const res = await this.request(`/api/${this.config.session}/auth/request-code`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phoneNumber }),
-    });
-    if (!res.ok) {
-      throw new Error(`WAHA request pairing code failed: HTTP ${res.status}`);
-    }
-    return wahaPairingCodeSchema.parse(await res.json());
+  requestPairingCode(phoneNumber: string): Promise<{ code: string }> {
+    return wahaRequestPairingCode(this.session, phoneNumber);
   }
 
-  async getSessionInfo(): Promise<SessionInfo> {
-    const session = await this.getSession();
-    const status = mapSessionStatus(session?.status ?? "STOPPED");
-    const info: SessionInfo = { status, warnings: [] };
-    const res = await this.request(`/api/sessions/${this.config.session}/me`);
-    if (!res.ok) return info;
-    const me = wahaMeSchema.parse(await res.json());
-    if (me.id) info.phone = me.id.split("@")[0];
-    if (me.pushName) info.pushName = me.pushName;
-    if (me.reachoutTimelock) info.warnings.push("reachout_timelock");
-    const capping = me.messageCapping?.state;
-    if (capping && capping !== "NONE") {
-      info.warnings.push(`message_capping:${capping.toLowerCase()}`);
-    }
-    return info;
+  getSessionInfo(): Promise<SessionInfo> {
+    return wahaGetSessionInfo(this.session);
   }
 
-  async getServerInfo(): Promise<ServerInfo> {
-    const res = await this.request(`/api/server/version`);
-    if (!res.ok) {
-      throw new Error(`WAHA server version failed: HTTP ${res.status}`);
-    }
-    const parsed = wahaServerVersionSchema.parse(await res.json());
-    return { version: parsed.version, engine: parsed.engine ?? "unknown", tier: parsed.tier };
+  getServerInfo(): Promise<ServerInfo> {
+    return wahaGetServerInfo(this.session);
   }
 
   /** 1:1 chats only — groups (@g.us), broadcasts and newsletters are skipped. */
@@ -299,18 +155,14 @@ export class WahaChannelProvider implements ChannelProvider {
       throw new Error(`WAHA list messages failed: HTTP ${res.status}`);
     }
     const rows = z.array(z.unknown()).parse(await res.json());
-    const messages: InboundChannelMessage[] = [];
-    for (const row of rows) {
+    return rows.flatMap((row) => {
       const message = wahaMessageSchema.safeParse(row);
-      if (!message.success || message.data.fromMe) continue;
-      messages.push(wahaToInbound(message.data));
-    }
-    return messages;
+      return message.success && !message.data.fromMe ? [wahaToInbound(message.data)] : [];
+    });
   }
 
-  async getConnectionStatus(): Promise<ConnectionStatus> {
-    const session = await this.getSession();
-    return mapSessionStatus(session?.status ?? "STOPPED");
+  getConnectionStatus(): Promise<ConnectionStatus> {
+    return wahaGetConnectionStatus(this.session);
   }
 
   /** fetch bound to baseUrl + X-Api-Key; absolute media URLs pass through. */
@@ -329,7 +181,7 @@ export class WahaChannelProvider implements ChannelProvider {
   }
 
   sendPresence(chatId: string, presence: "typing" | "recording" | "paused"): Promise<void> {
-    return wahaSendPresence(this.request, this.config.session, chatId, presence);
+    return wahaSendPresence(this.request, this.config.session, { chatId, presence });
   }
 
   subscribePresence(chatId: string): Promise<void> {
@@ -337,52 +189,20 @@ export class WahaChannelProvider implements ChannelProvider {
   }
 
   sendReaction(messageExternalId: string, emoji: string): Promise<void> {
-    return wahaSendReaction(this.request, this.config.session, messageExternalId, emoji);
+    return wahaSendReaction(this.request, this.config.session, { messageExternalId, emoji });
   }
 
   editMessage(chatId: string, messageExternalId: string, text: string): Promise<void> {
-    return wahaEditMessage(this.request, this.config.session, { chatId, messageExternalId }, text);
+    return wahaEditMessage(this.request, this.config.session, { chatId, messageExternalId, text });
   }
 
   deleteMessage(chatId: string, messageExternalId: string): Promise<void> {
     return wahaDeleteMessage(this.request, this.config.session, { chatId, messageExternalId });
   }
 
-  /**
-   * Resolves a provider-stamped media url to a safe absolute target on the
-   * WAHA host. GOWS may emit relative media paths — resolve them on
-   * baseUrl. media.url is provider-generated, but the api key must never
-   * leave the WAHA host: same-origin passes as-is; a foreign /api/files/*
-   * path is the same file on the trusted host (WAHA stamps its own
-   * WAHA_BASE_URL, default http://localhost:3000) so re-root
-   * pathname+search; a localhost-family origin is WAHA's own view of
-   * itself — any path there is a WAHA url, re-root it the same way.
-   * Anything else is refused. Origin check (not prefix): "http://waha@evil"
-   * or "http://waha.evil" would pass a startsWith test and leak X-Api-Key.
-   */
+  /** See resolveMediaUrl (waha-media.ts) — the api key never leaves the WAHA host. */
   private resolveMediaUrl(url: string): string {
-    const absolute = url.startsWith("/") ? `${this.baseUrl}${url}` : url;
-    let parsed: URL;
-    try {
-      parsed = new URL(absolute);
-    } catch {
-      throw new Error("WAHA fetchMedia refused: unparseable url");
-    }
-    if (parsed.origin === new URL(this.baseUrl).origin) return absolute;
-    const isLocalhost =
-      parsed.hostname === "localhost" ||
-      parsed.hostname === "127.0.0.1" ||
-      parsed.hostname === "::1" ||
-      parsed.hostname === "[::1]";
-    // /api/s3/{bucket}/{key} is WAHA's S3 proxy route (WAHA_S3_PROXY_FILES)
-    // — the stamped media.url path is /api/s3/*, not /api/files/*.
-    const isWahaFilePath =
-      parsed.pathname.startsWith("/api/files/") || parsed.pathname.startsWith("/api/s3/");
-    if (isLocalhost || isWahaFilePath) {
-      return `${this.baseUrl}${parsed.pathname}${parsed.search}`;
-    }
-    // Origin only — the path/query of a signed url must never hit logs.
-    throw new Error(`WAHA fetchMedia refused: url outside the WAHA host (origin ${parsed.origin})`);
+    return resolveMediaUrl(this.baseUrl, url);
   }
 
   async fetchMedia(url: string): Promise<{ body: Uint8Array; contentType: string | null }> {
@@ -412,26 +232,8 @@ export class WahaChannelProvider implements ChannelProvider {
       messageExternalId: messageId,
     });
     if (!ref) return null;
-    const attempts: Array<() => Promise<{ body: Uint8Array; contentType: string | null }>> = [];
-    const mediaUrl = ref.url;
-    if (mediaUrl) {
-      attempts.push(() => wahaFetchMedia(this.request, this.resolveMediaUrl(mediaUrl)));
-      if (WahaChannelProvider.isAnonymousFetchable(mediaUrl)) {
-        attempts.push(() => this.fetchAnonymousMedia(mediaUrl));
-      }
-    }
-    // S3 storage stamps the exact object location — the proxy route is
-    // /api/s3/{bucket}/{key} (WAHA_S3_PROXY_FILES). Works even when
-    // media.url is null or stamped with WAHA's localhost base.
-    if (ref.s3) {
-      const s3Path = `/api/s3/${ref.s3.bucket}/${ref.s3.key}`;
-      attempts.push(() => wahaFetchMedia(this.request, this.resolveMediaUrl(s3Path)));
-    }
-    for (const path of this.mediaFilePaths(ref.filename, messageId, ref.mimetype)) {
-      attempts.push(() => wahaFetchMedia(this.request, this.resolveMediaUrl(path)));
-    }
     let lastError: unknown;
-    for (const attempt of attempts) {
+    for (const attempt of this.mediaAttempts(ref, messageId)) {
       try {
         return await attempt();
       } catch (error) {
@@ -444,26 +246,31 @@ export class WahaChannelProvider implements ChannelProvider {
     );
   }
 
-  /**
-   * http(s) urls on non-WhatsApp hosts may be pre-signed media (S3/MinIO/
-   * RustFS) — internal S3 endpoints are plain http. Safe to fetch
-   * anonymously: the url is stamped by WAHA's own media layer in response
-   * to our authenticated downloadMedia call, and the api key must never
-   * ride along. *.whatsapp.net hosts are the encrypted CDN — skipped, the
-   * blob is undecryptable here anyway.
-   */
-  private static isAnonymousFetchable(url: string): boolean {
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
-      const host = parsed.hostname;
-      // localhost urls are WAHA's own view of itself — fetched from our
-      // container they'd hit *this* app, not WAHA.
-      if (host === "localhost" || host === "127.0.0.1" || host === "::1") return false;
-      return host !== "whatsapp.net" && !host.endsWith(".whatsapp.net");
-    } catch {
-      return false;
-    }
+  /** Download attempts for a message's media, in the order documented on fetchMessageMedia. */
+  private mediaAttempts(
+    ref: NonNullable<Awaited<ReturnType<typeof wahaFetchMessageMediaRef>>>,
+    messageId: string,
+  ): Array<() => Promise<{ body: Uint8Array; contentType: string | null }>> {
+    const fetchPath = (path: string) => () =>
+      wahaFetchMedia(this.request, this.resolveMediaUrl(path));
+    const { url, s3 } = ref;
+    return [
+      ...(url
+        ? [
+            fetchPath(url),
+            ...(isAnonymousFetchable(url) ? [() => this.fetchAnonymousMedia(url)] : []),
+          ]
+        : []),
+      // S3 storage stamps the exact object location — the proxy route is
+      // /api/s3/{bucket}/{key} (WAHA_S3_PROXY_FILES). Works even when
+      // media.url is null or stamped with WAHA's localhost base.
+      ...(s3 ? [fetchPath(`/api/s3/${s3.bucket}/${s3.key}`)] : []),
+      ...mediaFilePaths(this.config.session, {
+        filename: ref.filename,
+        messageId,
+        mimetype: ref.mimetype,
+      }).map(fetchPath),
+    ];
   }
 
   private async fetchAnonymousMedia(
@@ -475,67 +282,6 @@ export class WahaChannelProvider implements ChannelProvider {
       body: new Uint8Array(await res.arrayBuffer()),
       contentType: res.headers.get("content-type"),
     };
-  }
-
-  /**
-   * Candidate /api/files paths for a downloaded message. WAHA names the
-   * stored object with the FULL serialized message id
-   * (false_<chat>_<stanza>) — S3 keys are {session}/{serializedId}.{ext}
-   * and the proxied url drops the session dir. media.filename is the
-   * bare stanza/original name and may differ, and the bare messageId
-   * segment is the last resort. Extension comes from the filename, else
-   * the mimetype.
-   */
-  private mediaFilePaths(
-    filename: string | null,
-    messageId: string,
-    mimetype: string | null,
-  ): string[] {
-    const paths: string[] = [];
-    const session = this.config.session;
-    const bareId = messageId.split("_").pop();
-    const ext = filename?.match(/\.[a-z0-9]+$/i)?.[0] ?? WahaChannelProvider.mimeExt(mimetype);
-    if (ext) {
-      const serialized = encodeURIComponent(`${messageId}${ext}`);
-      paths.push(`/api/files/${serialized}`, `/api/files/${session}/${serialized}`);
-    }
-    if (filename) {
-      const name = encodeURIComponent(filename);
-      paths.push(`/api/files/${session}/${name}`, `/api/files/${name}`);
-    }
-    if (bareId && ext) {
-      const bare = encodeURIComponent(`${bareId}${ext}`);
-      paths.push(`/api/files/${session}/${bare}`, `/api/files/${bare}`);
-    }
-    return [...new Set(paths)];
-  }
-
-  /** Extension for the common media mimetypes WAHA reports. */
-  private static mimeExt(mimetype: string | null): string | undefined {
-    switch (mimetype?.split(";")[0]?.trim().toLowerCase()) {
-      case "image/webp":
-        return ".webp";
-      case "image/jpeg":
-        return ".jpg";
-      case "image/png":
-        return ".png";
-      case "image/gif":
-        return ".gif";
-      case "video/mp4":
-        return ".mp4";
-      case "audio/ogg":
-        return ".ogg";
-      case "audio/mpeg":
-        return ".mp3";
-      case "audio/mp4":
-        return ".m4a";
-      case "audio/webm":
-        return ".webm";
-      case "application/pdf":
-        return ".pdf";
-      default:
-        return undefined;
-    }
   }
 
   /**

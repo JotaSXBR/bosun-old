@@ -1,53 +1,29 @@
 // Demo content seed — inserts seed-data.ts into the Demo org. Idempotent:
 // every block keys off a natural id (contact channelUserId, conversation
 // externalId, agent name, entry title) and skips what already exists.
+// Conversations live in seed-threads.ts, AI content in seed-ai.ts.
 import { createCipheriv, randomBytes } from "node:crypto";
 
-import { type createDb, schema } from "@crm/db";
-import { and, eq, sql } from "drizzle-orm";
+import { schema } from "@crm/db";
+import { and, eq } from "drizzle-orm";
 
-import {
-  DEMO_AGENTS,
-  DEMO_CONTACTS,
-  DEMO_DEALS,
-  DEMO_KNOWLEDGE,
-  DEMO_MEMORY,
-  DEMO_USAGE,
-  THREADS,
-  type ThreadSpec,
-  WIDGET_VISITORS,
-} from "./seed-data";
-
-type SeedDb = ReturnType<typeof createDb>;
-type IdMap = ReadonlyMap<string, string>;
+import { ensureAiContent } from "./seed-ai";
+import { DEMO_CONTACTS, WIDGET_VISITORS } from "./seed-data";
+import { DEMO_DEALS } from "./seed-data-deals";
+import { type IdMap, type SeedDb, ts } from "./seed-shared";
+import { ensureConversations, type ThreadCtx } from "./seed-threads";
 
 const {
   channelConnections,
   contacts,
-  conversations,
-  messages,
   teams,
   labels,
-  conversationLabels,
   deals,
   dealLabels,
   funnelStages,
   funnels,
-  agents,
-  knowledgeEntries,
-  memoryEntries,
-  agentSuggestions,
-  aiUsageEvents,
   siteChatSessions,
-  ticketCounters,
 } = schema;
-
-function ts(daysAgo: number, hour = 10, minute = 0): Date {
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
-  d.setHours(hour, minute, 0, 0);
-  return d;
-}
 
 // Mirror of @crm/core/lib/crypto.ts encryptJson (auth can't depend on core):
 // `v1.<iv>.<tag>.<ciphertext>` AES-256-GCM under CHANNEL_CREDENTIALS_KEY.
@@ -77,10 +53,9 @@ const CONNECTION_CREDENTIALS: Record<string, unknown> = {
 async function ensureConnection(
   db: SeedDb,
   orgId: string,
-  kind: string,
-  name: string,
-  webhookToken: string,
+  conn: { kind: string; name: string; webhookToken: string },
 ): Promise<string> {
+  const { kind, name, webhookToken } = conn;
   const [existing] = await db
     .select({
       id: channelConnections.id,
@@ -151,337 +126,98 @@ async function ensureContacts(
   return map;
 }
 
-async function nextTicketNumber(db: SeedDb, orgId: string): Promise<number> {
-  const [counter] = await db
-    .insert(ticketCounters)
-    .values({ organizationId: orgId, value: 1 })
-    .onConflictDoUpdate({
-      target: ticketCounters.organizationId,
-      set: { value: sql`${ticketCounters.value} + 1` },
-    })
-    .returning({ value: ticketCounters.value });
-  if (!counter) throw new Error("failed to increment ticket counter");
-  return counter.value;
+type DealsCtx = Pick<
+  ThreadCtx,
+  "db" | "orgId" | "contactMap" | "convIdBySuffix" | "labelIdByName"
+> & { funnelId: string };
+type DealSpec = (typeof DEMO_DEALS)[number];
+
+async function loadStageIds(db: SeedDb, funnelId: string): Promise<Map<string, string>> {
+  const stages = await db
+    .select({ id: funnelStages.id, name: funnelStages.name })
+    .from(funnelStages)
+    .where(eq(funnelStages.funnelId, funnelId));
+  return new Map(stages.map((s) => [s.name, s.id]));
 }
 
-async function bumpContactTicket(db: SeedDb, contactId: string): Promise<number> {
-  const [row] = await db
-    .update(contacts)
-    .set({ ticketCounter: sql`${contacts.ticketCounter} + 1`, updatedAt: new Date() })
-    .where(eq(contacts.id, contactId))
-    .returning({ seq: contacts.ticketCounter });
-  return row?.seq ?? 1;
+async function dealExists(ctx: DealsCtx, contactId: string, title: string): Promise<boolean> {
+  const [existing] = await ctx.db
+    .select({ id: deals.id })
+    .from(deals)
+    .where(
+      and(
+        eq(deals.organizationId, ctx.orgId),
+        eq(deals.contactId, contactId),
+        eq(deals.title, title),
+      ),
+    )
+    .limit(1);
+  return Boolean(existing);
 }
 
-type ThreadCtx = {
-  db: SeedDb;
-  orgId: string;
-  connId: Record<"waha" | "site", string>;
-  contactMap: Map<string, { id: string; channelUserId: string }>;
-  userIdByRole: IdMap;
-  teamIdByName: IdMap;
-  labelIdByName: IdMap;
-  convIdBySuffix: Map<string, string>;
-};
-
-async function insertThreadMessages(
-  ctx: ThreadCtx,
-  t: ThreadSpec,
-  convId: string,
-  contactId: string,
-): Promise<void> {
-  for (const [i, m] of t.msgs.entries()) {
-    await ctx.db.insert(messages).values({
+async function insertDeal(
+  ctx: DealsCtx,
+  d: DealSpec,
+  target: { contactId: string; stageId: string },
+): Promise<string | undefined> {
+  const [deal] = await ctx.db
+    .insert(deals)
+    .values({
       organizationId: ctx.orgId,
-      conversationId: convId,
-      channelConnectionId: ctx.connId[t.conn],
-      contactId: m.dir === "inbound" ? contactId : null,
-      direction: m.dir,
-      content: { type: "text", text: m.text },
-      externalId: `seed-msg-${t.externalSuffix}-${i}`,
-      private: m.private ?? false,
-      authorId:
-        m.dir === "outbound" || m.private
-          ? (ctx.userIdByRole.get(m.authorRole ?? "agent") ?? null)
-          : null,
-      status: m.status ?? (m.dir === "inbound" ? "received" : "delivered"),
-      sentAt: ts(m.daysAgo, m.hour ?? 10, i * 4),
-    });
-  }
-  for (const labelName of t.labels ?? []) {
+      funnelId: ctx.funnelId,
+      stageId: target.stageId,
+      contactId: target.contactId,
+      conversationId: "conv" in d ? (ctx.convIdBySuffix.get(d.conv) ?? null) : null,
+      title: d.title,
+      valueCents: d.valueCents,
+      position: d.position,
+    })
+    .returning({ id: deals.id });
+  return deal?.id;
+}
+
+async function labelDeal(ctx: DealsCtx, dealId: string | undefined, d: DealSpec): Promise<void> {
+  for (const labelName of "labels" in d ? d.labels : []) {
     const labelId = ctx.labelIdByName.get(labelName);
-    if (labelId) {
+    if (dealId && labelId) {
       await ctx.db
-        .insert(conversationLabels)
-        .values({ organizationId: ctx.orgId, conversationId: convId, labelId })
+        .insert(dealLabels)
+        .values({ organizationId: ctx.orgId, dealId, labelId })
         .onConflictDoNothing();
     }
   }
 }
 
-async function insertConversationRow(
-  ctx: ThreadCtx,
-  t: ThreadSpec,
-  connectionId: string,
-  externalId: string,
-  contactId: string,
-): Promise<string | null> {
-  const lastMsg = t.msgs[t.msgs.length - 1]!;
-  const lastChannelMsg = [...t.msgs].reverse().find((m) => !m.private) ?? lastMsg;
-  const firstReply = t.msgs.find((m) => m.dir === "outbound");
-  const resolved = t.status === "resolved" || t.status === "closed";
-
-  const [conv] = await ctx.db
-    .insert(conversations)
-    .values({
-      organizationId: ctx.orgId,
-      channelConnectionId: connectionId,
-      contactId,
-      externalId,
-      status: t.status,
-      sectorId: t.sector ? (ctx.teamIdByName.get(t.sector) ?? null) : null,
-      assigneeId: t.assigneeRole ? (ctx.userIdByRole.get(t.assigneeRole) ?? null) : null,
-      precededById: t.precededByKey ? (ctx.convIdBySuffix.get(t.precededByKey) ?? null) : null,
-      ticketNumber: await nextTicketNumber(ctx.db, ctx.orgId),
-      ticketSeq: await bumpContactTicket(ctx.db, contactId),
-      resolvedAt: resolved ? ts(3, 17) : null,
-      resolvedById: resolved ? (ctx.userIdByRole.get(t.assigneeRole ?? "agent") ?? null) : null,
-      snoozedUntil: t.snoozedUntil ?? null,
-      firstResponseAt: firstReply ? ts(firstReply.daysAgo, firstReply.hour ?? 9) : null,
-      lastMessageAt: ts(lastMsg.daysAgo, lastMsg.hour ?? 10),
-      lastMessagePreview: lastChannelMsg.text.slice(0, 140),
-      lastMessageDirection: lastChannelMsg.dir,
-      createdAt: ts(t.msgs[0]!.daysAgo, t.msgs[0]!.hour ?? 10),
-    })
-    .returning({ id: conversations.id });
-  return conv?.id ?? null;
-}
-
-async function ensureOneThread(ctx: ThreadCtx, t: ThreadSpec): Promise<void> {
-  const contact = ctx.contactMap.get(t.contactKey);
-  if (!contact) return;
-  const connectionId = ctx.connId[t.conn];
-  const externalId = `seed-conv-${t.externalSuffix}`;
-
-  const [existing] = await ctx.db
-    .select({ id: conversations.id })
-    .from(conversations)
-    .where(
-      and(
-        eq(conversations.channelConnectionId, connectionId),
-        eq(conversations.externalId, externalId),
-      ),
-    )
-    .limit(1);
-  if (existing) {
-    ctx.convIdBySuffix.set(t.externalSuffix, existing.id);
-    return;
-  }
-
-  const convId = await insertConversationRow(ctx, t, connectionId, externalId, contact.id);
-  if (!convId) return;
-  ctx.convIdBySuffix.set(t.externalSuffix, convId);
-  await insertThreadMessages(ctx, t, convId, contact.id);
-}
-
-async function ensureConversations(ctx: ThreadCtx): Promise<Map<string, string>> {
-  for (const t of THREADS) {
-    await ensureOneThread(ctx, t);
-  }
-  return ctx.convIdBySuffix;
-}
-
-async function ensureDeals(
-  db: SeedDb,
-  orgId: string,
-  funnelId: string,
-  ctx: Pick<ThreadCtx, "contactMap" | "convIdBySuffix" | "labelIdByName">,
-): Promise<void> {
-  const stageIdByName = new Map(
-    (
-      await db
-        .select({ id: funnelStages.id, name: funnelStages.name })
-        .from(funnelStages)
-        .where(eq(funnelStages.funnelId, funnelId))
-    ).map((s) => [s.name, s.id]),
-  );
+async function ensureDeals(ctx: DealsCtx): Promise<void> {
+  const stageIdByName = await loadStageIds(ctx.db, ctx.funnelId);
 
   for (const d of DEMO_DEALS) {
     const contact = ctx.contactMap.get(d.contactKey);
     const stageId = stageIdByName.get(d.stage);
     if (!contact || !stageId) continue;
+    if (await dealExists(ctx, contact.id, d.title)) continue;
 
-    const [existing] = await db
-      .select({ id: deals.id })
-      .from(deals)
-      .where(
-        and(
-          eq(deals.organizationId, orgId),
-          eq(deals.contactId, contact.id),
-          eq(deals.title, d.title),
-        ),
-      )
-      .limit(1);
-    if (existing) continue;
-
-    const [deal] = await db
-      .insert(deals)
-      .values({
-        organizationId: orgId,
-        funnelId,
-        stageId,
-        contactId: contact.id,
-        conversationId: "conv" in d ? (ctx.convIdBySuffix.get(d.conv) ?? null) : null,
-        title: d.title,
-        valueCents: d.valueCents,
-        position: d.position,
-      })
-      .returning({ id: deals.id });
-
-    for (const labelName of "labels" in d ? d.labels : []) {
-      const labelId = ctx.labelIdByName.get(labelName);
-      if (deal && labelId) {
-        await db
-          .insert(dealLabels)
-          .values({ organizationId: orgId, dealId: deal.id, labelId })
-          .onConflictDoNothing();
-      }
-    }
+    const dealId = await insertDeal(ctx, d, { contactId: contact.id, stageId });
+    await labelDeal(ctx, dealId, d);
   }
 }
 
-async function ensureAgents(db: SeedDb, orgId: string): Promise<void> {
-  for (const a of DEMO_AGENTS) {
-    const [existing] = await db
-      .select({ id: agents.id })
-      .from(agents)
-      .where(and(eq(agents.organizationId, orgId), eq(agents.name, a.name)))
-      .limit(1);
-    if (existing) continue;
-    await db.insert(agents).values({
-      organizationId: orgId,
-      name: a.name,
-      specialty: a.specialty,
-      status: a.status,
-      kind: "org",
-      systemPrompt: a.systemPrompt,
-      businessRules: "businessRules" in a ? a.businessRules : null,
-      signatureLine: "signatureLine" in a ? a.signatureLine : null,
-    });
-  }
-}
-
-async function ensureKnowledge(db: SeedDb, orgId: string): Promise<void> {
-  for (const k of DEMO_KNOWLEDGE) {
-    const [existing] = await db
-      .select({ id: knowledgeEntries.id })
-      .from(knowledgeEntries)
-      .where(and(eq(knowledgeEntries.organizationId, orgId), eq(knowledgeEntries.title, k.title)))
-      .limit(1);
-    if (existing) continue;
-    await db
-      .insert(knowledgeEntries)
-      .values({ organizationId: orgId, title: k.title, content: k.content });
-  }
-}
-
-async function ensureMemory(db: SeedDb, orgId: string, ownerId: string): Promise<void> {
-  for (const m of DEMO_MEMORY) {
-    const [existing] = await db
-      .select({ id: memoryEntries.id })
-      .from(memoryEntries)
-      .where(and(eq(memoryEntries.organizationId, orgId), eq(memoryEntries.content, m.content)))
-      .limit(1);
-    if (existing) continue;
-    await db.insert(memoryEntries).values({
-      organizationId: orgId,
-      type: m.type,
-      scope: "org",
-      content: m.content,
-      confidence: m.confidence,
-      status: "canon",
-      staleAfter: ts(-m.staleAfterDays),
-      verifiedBy: ownerId,
-      verifiedAt: ts(7),
-    });
-  }
-}
-
-async function ensureSuggestions(db: SeedDb, orgId: string, convIdBySuffix: IdMap): Promise<void> {
-  const [any] = await db
-    .select({ id: agentSuggestions.id })
-    .from(agentSuggestions)
-    .where(eq(agentSuggestions.organizationId, orgId))
+async function ensureDemoDeals(ctx: ThreadCtx): Promise<void> {
+  const [funnel] = await ctx.db
+    .select({ id: funnels.id })
+    .from(funnels)
+    .where(and(eq(funnels.organizationId, ctx.orgId), eq(funnels.name, "Pipeline Demo")))
     .limit(1);
-  if (any) return;
-  const ricardoConv = convIdBySuffix.get("ricardo") ?? null;
-  await db.insert(agentSuggestions).values([
-    {
-      organizationId: orgId,
-      targetType: "knowledge_entry",
-      targetId: null,
-      payload: {
-        title: "Política de emissão de nota fiscal",
-        content:
-          "O Bosun não emite NF-e no produto. Para nota de serviço, encaminhe a solicitação ao financeiro informando CNPJ e plano contratado.",
-      },
-      rationale:
-        "2 conversas recentes (Beto Campos, Ricardo Alves) perguntaram sobre NF-e e não há entrada de conhecimento cobrindo o tema.",
-      status: "pending",
-      sourceConversationId: convIdBySuffix.get("beto") ?? null,
-      proposedBy: null,
-    },
-    {
-      organizationId: orgId,
-      targetType: "memory",
-      targetId: null,
-      payload: {
-        type: "pattern",
-        scope: "org",
-        content:
-          "Perguntas sobre isolamento/multi-tenant chegam de leads com 2+ unidades — indicador de fit Enterprise.",
-        confidence: "medium",
-        staleAfterDays: 90,
-        sourceConversationIds: ricardoConv ? [ricardoConv] : [],
-      },
-      rationale: "Padrão observado em 3 conversas de prospects multi-unidade na última semana.",
-      status: "pending",
-      sourceConversationId: ricardoConv,
-      proposedBy: null,
-    },
-  ]);
-}
-
-async function ensureUsage(db: SeedDb, orgId: string): Promise<void> {
-  const [any] = await db
-    .select({ id: aiUsageEvents.id })
-    .from(aiUsageEvents)
-    .where(eq(aiUsageEvents.organizationId, orgId))
-    .limit(1);
-  if (any) return;
-  for (const u of DEMO_USAGE) {
-    await db.insert(aiUsageEvents).values({
-      organizationId: orgId,
-      callKind: u.callKind,
-      provider: u.provider,
-      model: u.model,
-      tokensIn: u.tokensIn,
-      tokensOut: u.tokensOut,
-      latencyMs: u.latencyMs,
-      status: "status" in u ? u.status : "ok",
-      createdAt: ts(u.daysAgo, 8),
-    });
-  }
+  if (funnel) await ensureDeals({ ...ctx, funnelId: funnel.id });
 }
 
 async function ensureWidgetSessions(
   db: SeedDb,
   orgId: string,
-  siteConnId: string,
-  contactMap: Map<string, { id: string }>,
+  site: { connectionId: string; contactMap: Map<string, { id: string }> },
 ): Promise<void> {
   for (const v of WIDGET_VISITORS) {
-    const contact = contactMap.get(v.key);
+    const contact = site.contactMap.get(v.key);
     if (!contact) continue;
     const token = `seed-widget-${v.key}`;
     const [existing] = await db
@@ -492,12 +228,27 @@ async function ensureWidgetSessions(
     if (existing) continue;
     await db.insert(siteChatSessions).values({
       organizationId: orgId,
-      channelConnectionId: siteConnId,
+      channelConnectionId: site.connectionId,
       contactId: contact.id,
       token,
       lastSeenAt: ts(0, 9),
     });
   }
+}
+
+async function loadLookups(db: SeedDb, orgId: string) {
+  const orgTeams = await db
+    .select({ id: teams.id, name: teams.name })
+    .from(teams)
+    .where(eq(teams.organizationId, orgId));
+  const orgLabels = await db
+    .select({ id: labels.id, name: labels.name })
+    .from(labels)
+    .where(eq(labels.organizationId, orgId));
+  return {
+    teamIdByName: new Map(orgTeams.map((t) => [t.name === "Vendas" ? "vendas" : "suporte", t.id])),
+    labelIdByName: new Map(orgLabels.map((l) => [l.name, l.id])),
+  };
 }
 
 export async function ensureDemoContent(
@@ -506,27 +257,19 @@ export async function ensureDemoContent(
   userIdByRole: IdMap,
 ): Promise<void> {
   const connId = {
-    waha: await ensureConnection(db, orgId, "waha", "WhatsApp Comercial", "seed-waha-demo"),
-    site: await ensureConnection(db, orgId, "site_chat", "Widget site bosun.io", "seed-site-demo"),
+    waha: await ensureConnection(db, orgId, {
+      kind: "waha",
+      name: "WhatsApp Comercial",
+      webhookToken: "seed-waha-demo",
+    }),
+    site: await ensureConnection(db, orgId, {
+      kind: "site_chat",
+      name: "Widget site bosun.io",
+      webhookToken: "seed-site-demo",
+    }),
   };
   const contactMap = await ensureContacts(db, orgId);
-
-  const teamIdByName = new Map(
-    (
-      await db
-        .select({ id: teams.id, name: teams.name })
-        .from(teams)
-        .where(eq(teams.organizationId, orgId))
-    ).map((t) => [t.name === "Vendas" ? "vendas" : "suporte", t.id]),
-  );
-  const labelIdByName = new Map(
-    (
-      await db
-        .select({ id: labels.id, name: labels.name })
-        .from(labels)
-        .where(eq(labels.organizationId, orgId))
-    ).map((l) => [l.name, l.id]),
-  );
+  const { teamIdByName, labelIdByName } = await loadLookups(db, orgId);
 
   const ctx: ThreadCtx = {
     db,
@@ -539,21 +282,9 @@ export async function ensureDemoContent(
     convIdBySuffix: new Map(),
   };
   const convIdBySuffix = await ensureConversations(ctx);
-
-  const [funnel] = await db
-    .select({ id: funnels.id })
-    .from(funnels)
-    .where(and(eq(funnels.organizationId, orgId), eq(funnels.name, "Pipeline Demo")))
-    .limit(1);
-  if (funnel) {
-    await ensureDeals(db, orgId, funnel.id, { contactMap, convIdBySuffix, labelIdByName });
-  }
+  await ensureDemoDeals(ctx);
 
   const ownerId = userIdByRole.get("owner") ?? [...userIdByRole.values()][0];
-  await ensureAgents(db, orgId);
-  await ensureKnowledge(db, orgId);
-  if (ownerId) await ensureMemory(db, orgId, ownerId);
-  await ensureSuggestions(db, orgId, convIdBySuffix);
-  await ensureUsage(db, orgId);
-  await ensureWidgetSessions(db, orgId, connId.site, contactMap);
+  await ensureAiContent(db, orgId, { ownerId, convIdBySuffix });
+  await ensureWidgetSessions(db, orgId, { connectionId: connId.site, contactMap });
 }

@@ -20,47 +20,56 @@ function ensureOk(res: FetchResponse, op: string): void {
   if (!res.ok) throw new Error(`WAHA ${op} failed: HTTP ${res.status}`);
 }
 
+type MediaContent = Exclude<OutboundMessage["content"], { type: "text" }>;
+type SendPlan = { path: string; body: Record<string, unknown> };
+
+function mediaPath(mediaKind: MediaContent["mediaKind"], isVoice: boolean | undefined): string {
+  if (isVoice) return "/api/sendVoice";
+  if (mediaKind === "image") return "/api/sendImage";
+  if (mediaKind === "video") return "/api/sendVideo";
+  return "/api/sendFile"; // plain audio + documents go through sendFile
+}
+
+function buildMediaPlan(session: string, to: string, content: MediaContent): SendPlan {
+  if (content.source.type !== "url") {
+    throw new Error("WAHA adapter only supports media by URL");
+  }
+  const isVoice = content.mediaKind === "audio" && content.voiceNote;
+  const body: Record<string, unknown> = {
+    session,
+    chatId: to,
+    file: {
+      // Voice notes: mimetype/filename describe the target (ogg/opus
+      // PTT) — convert:true transcodes the browser's webm source.
+      mimetype: isVoice ? "audio/ogg; codecs=opus" : content.mimeType,
+      filename: isVoice
+        ? `${(content.filename ?? "voice").replace(/.[^.]+$/, "")}.ogg`
+        : content.filename,
+      url: content.source.url,
+    },
+    caption: content.caption,
+  };
+  // Browser recordings (webm/opus) need transcoding to ogg/opus PTT.
+  if (isVoice) body.convert = true;
+  return { path: mediaPath(content.mediaKind, isVoice), body };
+}
+
+function buildSendPlan(session: string, message: OutboundMessage): SendPlan {
+  const { content } = message;
+  const plan: SendPlan =
+    content.type === "text"
+      ? { path: "/api/sendText", body: { session, chatId: message.to, text: content.text } }
+      : buildMediaPlan(session, message.to, content);
+  if (message.replyToId) plan.body.reply_to = message.replyToId;
+  return plan;
+}
+
 export async function wahaSendMessage(
   request: WahaRequest,
   session: string,
   message: OutboundMessage,
 ): Promise<SendMessageResult> {
-  const { content } = message;
-  let path: string;
-  let body: Record<string, unknown>;
-  if (content.type === "text") {
-    path = "/api/sendText";
-    body = { session, chatId: message.to, text: content.text };
-  } else {
-    if (content.source.type !== "url") {
-      throw new Error("WAHA adapter only supports media by URL");
-    }
-    const isVoice = content.mediaKind === "audio" && content.voiceNote;
-    path = isVoice
-      ? "/api/sendVoice"
-      : content.mediaKind === "image"
-        ? "/api/sendImage"
-        : content.mediaKind === "video"
-          ? "/api/sendVideo"
-          : "/api/sendFile"; // plain audio + documents go through sendFile
-    body = {
-      session,
-      chatId: message.to,
-      file: {
-        // Voice notes: mimetype/filename describe the target (ogg/opus
-        // PTT) — convert:true transcodes the browser's webm source.
-        mimetype: isVoice ? "audio/ogg; codecs=opus" : content.mimeType,
-        filename: isVoice
-          ? `${(content.filename ?? "voice").replace(/\.[^.]+$/, "")}.ogg`
-          : content.filename,
-        url: content.source.url,
-      },
-      caption: content.caption,
-    };
-    // Browser recordings (webm/opus) need transcoding to ogg/opus PTT.
-    if (isVoice) body.convert = true;
-  }
-  if (message.replyToId) body.reply_to = message.replyToId;
+  const { path, body } = buildSendPlan(session, message);
   const res = await request(path, {
     method: "POST",
     headers: JSON_HEADERS,
@@ -91,8 +100,7 @@ export async function wahaSendSeen(
 export async function wahaSendPresence(
   request: WahaRequest,
   session: string,
-  chatId: string,
-  presence: "typing" | "recording" | "paused",
+  { chatId, presence }: { chatId: string; presence: "typing" | "recording" | "paused" },
 ): Promise<void> {
   const res = await request(`/api/${session}/presence`, {
     method: "POST",
@@ -118,8 +126,7 @@ export async function wahaSubscribePresence(
 export async function wahaSendReaction(
   request: WahaRequest,
   session: string,
-  messageExternalId: string,
-  emoji: string,
+  { messageExternalId, emoji }: { messageExternalId: string; emoji: string },
 ): Promise<void> {
   const res = await request("/api/reaction", {
     method: "PUT",
@@ -138,13 +145,12 @@ const chatMessagePath = (session: string, target: WahaMessageTarget) =>
 export async function wahaEditMessage(
   request: WahaRequest,
   session: string,
-  target: WahaMessageTarget,
-  text: string,
+  edit: WahaMessageTarget & { text: string },
 ): Promise<void> {
-  const res = await request(chatMessagePath(session, target), {
+  const res = await request(chatMessagePath(session, edit), {
     method: "PUT",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text: edit.text }),
   });
   ensureOk(res, "editMessage");
 }

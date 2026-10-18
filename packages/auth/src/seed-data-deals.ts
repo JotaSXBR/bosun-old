@@ -1,0 +1,68 @@
+// Demo dataset for seed-content.ts — deals. Pure data, no logic.
+
+export const DEMO_DEALS = [
+  {
+    title: "Bosun Starter · Padaria Broma",
+    contactKey: "marina",
+    stage: "Qualificação",
+    valueCents: 14900,
+    position: 0,
+    conv: "marina",
+  },
+  {
+    title: "Bosun Pro · CT Telecom (2 números)",
+    contactKey: "carlos",
+    stage: "Proposta",
+    valueCents: 29900,
+    position: 0,
+    labels: ["Prioridade"],
+    conv: "carlos",
+  },
+  {
+    title: "Bosun Starter · Studio Flor",
+    contactKey: "fernanda",
+    stage: "Prospecção",
+    valueCents: 14900,
+    position: 0,
+  },
+  {
+    title: "Bosun Enterprise · Grupo Vetor (3 un.)",
+    contactKey: "ricardo",
+    stage: "Proposta",
+    valueCents: 89700,
+    position: 1,
+    labels: ["Prioridade"],
+    conv: "ricardo",
+  },
+  {
+    title: "Bosun Pro anual · JP Imóveis",
+    contactKey: "juliana",
+    stage: "Em execução",
+    valueCents: 299000,
+    position: 0,
+    labels: ["Recorrente"],
+    conv: "juliana",
+  },
+  {
+    title: "Bosun Starter · Academia Move",
+    contactKey: "paulo",
+    stage: "Concluído",
+    valueCents: 14900,
+    position: 0,
+    conv: "paulo",
+  },
+  {
+    title: "Bosun Pro · AnaDoces",
+    contactKey: "ana",
+    stage: "Em execução",
+    valueCents: 29900,
+    position: 1,
+  },
+  {
+    title: "Bosun Starter · LF Contábil",
+    contactKey: "luisa",
+    stage: "Qualificação",
+    valueCents: 14900,
+    position: 1,
+  },
+] as const;
