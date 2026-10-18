@@ -142,3 +142,23 @@ export async function enqueueContactGoogleSync(
   });
   return { skipped: false };
 }
+
+/**
+ * Queues a Google sweep for one org (the "Sincronizar agora" button). The
+ * singleton key keeps repeated clicks from stacking sweeps; the cron sweep is
+ * scheduled in boss.ts and needs no enqueue.
+ */
+export async function enqueueContactGoogleSweep(payload: {
+  organizationId: string;
+}): Promise<{ skipped: boolean }> {
+  const boss = getBoss();
+  if (!boss) {
+    startJobs().catch(() => {});
+    logger.warn("jobs not started; skipping enqueue", { queue: QUEUES.contactGoogleSweep });
+    return { skipped: true };
+  }
+  await boss.send(QUEUES.contactGoogleSweep, payload, {
+    singletonKey: `google-sweep:${payload.organizationId}`,
+  });
+  return { skipped: false };
+}

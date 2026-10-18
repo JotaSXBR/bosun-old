@@ -103,12 +103,20 @@ export async function syncContactToGoogle(
   const mirror: MirrorState = mirrorSchema.catch({}).parse(contact.metadata.google ?? {});
   const person = toPerson(contact);
   const hash = payloadHash(person);
-  if (mirror.resourceName && mirror.payloadHash === hash) return "unchanged";
-
+  // `lastAttemptAt` lets the sweep tell "checked, nothing to send" from "never tried".
   const save = (google: Record<string, unknown>) =>
     withTenant(db, organizationId, (tx) =>
-      updateContactGoogleSync(tx, organizationId, contactId, google),
+      updateContactGoogleSync(tx, organizationId, contactId, {
+        ...google,
+        lastAttemptAt: new Date().toISOString(),
+      }),
     );
+
+  if (mirror.resourceName && mirror.payloadHash === hash) {
+    const { lastError: _cleared, ...rest } = mirror;
+    await save(rest);
+    return "unchanged";
+  }
 
   try {
     const token = await getGoogleAccessToken(db, organizationId, deps.oauth);

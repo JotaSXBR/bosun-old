@@ -12,14 +12,22 @@ export type {
 } from "./google-people";
 export { createGooglePeopleClient, GooglePeopleError } from "./google-people";
 export type { GoogleSyncSummary } from "./google-sync-contacts";
-export { getGoogleSyncSummary, listGoogleSyncContactIds } from "./google-sync-contacts";
+export {
+  getGoogleSyncSummary,
+  listGoogleSyncContactIds,
+  listPendingGoogleSyncContactIds,
+} from "./google-sync-contacts";
 export type { ExternalConnectionPublic } from "./repository";
 export type { CompleteGoogleAuthorizationInput, SaveGoogleClientInput } from "./schemas";
 export {
   completeGoogleAuthorization,
   disconnectGoogle,
+  enableGoogleAutoSync,
   getGoogleAccessToken,
   getGoogleStatus,
+  isGoogleAutoSyncActive,
+  listGoogleAutoSyncOrganizationIds,
+  markGoogleSweepAt,
   saveGoogleClient,
   verifyGoogleConnection,
 } from "./service";

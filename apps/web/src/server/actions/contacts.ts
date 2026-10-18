@@ -1,8 +1,10 @@
 "use server";
 
+import { enqueueContactGoogleSync } from "@crm/automation";
 import { DomainError } from "@crm/core";
 import type { CreateContactInput, UpdateContactProfileInput } from "@crm/core/contacts";
 import { createContact, updateContactProfile } from "@crm/core/contacts";
+import { isGoogleAutoSyncActive } from "@crm/core/external-connections";
 import type { StartOutboundConversationInput } from "@crm/core/messaging";
 import { startOutboundConversation } from "@crm/core/messaging";
 import { getDb } from "@crm/db";
@@ -25,12 +27,24 @@ function errorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Best effort: the edit already succeeded, the periodic sweep covers a missed enqueue. */
+async function queueGoogleSync(organizationId: string, contactId: string): Promise<void> {
+  try {
+    if (await isGoogleAutoSyncActive(getDb(), organizationId)) {
+      await enqueueContactGoogleSync({ organizationId, contactId });
+    }
+  } catch (error) {
+    captureException(error, { action: "contacts", op: "google-sync-enqueue" });
+  }
+}
+
 export async function createContactAction(
   input: CreateContactInput,
 ): Promise<ContactsActionResult> {
   const ctx = await requireTenantContext();
   try {
     const contact = await createContact(getDb(), ctx, input);
+    await queueGoogleSync(ctx.organizationId, contact.id);
     revalidatePath("/app/contacts");
     return { ok: true, id: contact.id };
   } catch (error) {
@@ -44,7 +58,8 @@ export async function updateContactProfileAction(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const ctx = await requireTenantContext();
   try {
-    await updateContactProfile(getDb(), ctx, input);
+    const contact = await updateContactProfile(getDb(), ctx, input);
+    await queueGoogleSync(ctx.organizationId, contact.id);
     revalidatePath("/app/inbox");
     revalidatePath("/app/contacts");
     return { ok: true };

@@ -1,163 +1,145 @@
-# Plan — Google Contacts: motor de sync (slice 3a/3)
+# Plan — Google Contacts: sync automático (slice 3b/3)
 
-- **Origem**: `TODO.md` → P2 Google (slice 3) · `docs/product/contacts-google-sync.md` (§ Sync engine)
+- **Origem**: `TODO.md` → P2 Google (slice 3b) · `docs/product/contacts-google-sync.md` (§ Sync engine, "Known limits (3b)")
 - **Lifecycle**: spec ✓ → plan → build → test → review → ship
-- **Data**: 2026-10-16
+- **Data**: 2026-10-18
 
 ## Objetivo
 
-Um contato do Bosun é espelhado no Google (People API) por um job
-sequencial, e a organização dispara o envio de toda a base com o botão
-"Sincronizar agora" no card do Google — validável ponta a ponta no staging.
+Depois do primeiro "Sincronizar agora", o espelho no Google se mantém sozinho
+(edições na UI e varredura periódica), e o card mostra quantos contatos
+falharam, com faixa de aviso e a data da última varredura — sem varrer a base
+inteira a cada carregamento da página.
 
 ## Contexto
 
-Decisões do gate de esclarecimento (2026-10-16):
+Decisões do gate de esclarecimento (2026-10-18):
 
-- **Regra do usuário (mantida)**: os dados vivem no Bosun e funcionam sem
-  Google; o Google é só um espelho de backup, push-only, e só roda com uma
-  conexão `connected`.
-- **Fatiamento da slice 3 em dois planos**: 3a (este) = motor — cliente da
-  People API, mapeamento, job que envia **um** contato, botão "Sincronizar
-  agora" e os pré-requisitos de segurança. 3b = automação — gatilho nas
-  edições, varredura periódica, lotes (`batch*Contacts`), contadores e faixa
-  de erro no card. O 3b depende do 3a.
-- **Gatilho (vale para o 3b)**: híbrido — enfileira nas edições manuais e uma
-  varredura periódica (cron, como o `observer-scan`) cobre contatos criados
-  pelo ingest e conexões feitas depois.
-- **Sync inicial por confirmação**: ao conectar, nada é enviado sozinho; o
-  card mostra quantos contatos estão prontos e o botão **Sincronizar agora**
-  enfileira um job por contato elegível. Reexecutar é idempotente
-  (`resourceName` + hash do payload).
-- **LGPD — decisão do usuário: sempre espelhar tudo** (inclui endereço e
-  aniversário), sem opt-in por organização. A organização escolhe conectar o
-  Google e confirma o envio com o botão; o risco fica registrado aqui e
-  no spec.
-- **Pré-requisitos de segurança entram no 3a**: rejeitar caracteres de
-  controle/bidi em nome, empresa, cargo, endereço e notas, e credenciais
-  embutidas em `urls` (`https://user:pass@…`), porque esses valores passam a
-  sair do Bosun.
-- **Regras da People API (conferidas na doc oficial em 2026-10-16)**:
-  `updatePersonFields` é obrigatório e **substitui** os campos listados;
-  `etag` divergente → 400 `failedPrecondition` (reler e tentar uma vez);
-  mutates do mesmo usuário devem ser sequenciais; `searchContacts` casa por
-  prefixo e exige um pedido de aquecimento com consulta vazia (até 30
-  resultados), então todo candidato é conferido por igualdade exata;
-  `createContact` dá 400 se um campo singleton (`names`, `birthdays`,
-  `biographies`) tiver mais de um valor; `batch*Contacts` aceita até 200 por
-  chamada (3b).
-- **Ordem por conexão com `key_strict_fifo`** (pg-boss 12.35.0, tipos
-  instalados): a fila é criada com `policy: 'key_strict_fifo'` e todo envio
-  leva `singletonKey = google:<organizationId>`; a People API exige mutates
-  sequenciais por usuário, e a política garante FIFO por chave sem serializar
-  as outras organizações. **Cuidado documentado nos tipos**: um job `failed`
-  ou em retry segura os sucessores da mesma chave. Por isso o handler nunca
-  deixa um job falhar por erro de um contato: grava `metadata.google.lastError`
-  e conclui; o 429 usa backoff limitado dentro do cliente (não os `retry*` do
-  pg-boss) e, esgotado, vira `lastError` — a varredura do 3b tenta de novo.
-- **Elegibilidade**: contato com telefone de WhatsApp (`<dígitos>@c.us` →
-  E.164 `+<dígitos>`) **ou** e-mail; sem nenhum dos dois é ignorado. Nome ausente
-  → o campo `names` não é enviado. Foto, campos custom, grupos e deletes
-  nunca são enviados.
-- **Estado do sync no próprio contato**: `contacts.metadata.google`
-  (`resourceName`, `etag`, `payloadHash`, `lastSyncedAt`), gravado sem alterar
-  `updated_at` (para não reativar a varredura do 3b). Sem migração.
-- **Falha de token**: `invalid_grant` no refresh → conexão `needs_reauth`, o
-  job não faz nada e o card avisa (reaproveita o fluxo da slice 1).
+- **3a validada no staging (2026-10-17)**: conectado, 1 contato sincronizado,
+  data da última sincronização exibida. O plano da 3a foi arquivado em
+  `tasks/plan-google-sync-motor.done.md`.
+- **Sem `batch*Contacts`**: mantém **1 job por contato** em `key_strict_fifo`
+  (idempotente, erro isolado por contato, 429 já tem backoff). Batch só se a
+  base real justificar — fica registrado como não-objetivo, não como dívida.
+- **Gatilho = edição manual + varredura**. Editar/criar contato na UI
+  enfileira o job; um cron cobre o que a UI não vê (contatos criados pelo
+  ingest, falhas, conexões novas).
+- **Consentimento explícito e persistido** (LGPD, decisão da 3a: "dados só
+  saem após o clique"). O primeiro "Sincronizar agora" grava
+  `external_connections.auto_sync_since`; **gatilho e varredura só rodam com
+  esse marcador e conexão `connected`**. Desconectar apaga a linha, então
+  reconectar exige novo clique. Inferir o consentimento de "algum contato já
+  sincronizado" foi descartado: é implícito e quebra se o primeiro envio
+  falhar. Custo: **uma migração** (a 3a não teve).
+- **O botão passa a enfileirar um job de varredura** em vez de enfileirar
+  contato a contato dentro da requisição (limite "sequencial na requisição"
+  da 3a). Botão e cron usam o **mesmo** handler (`contact-google-sweep`);
+  com `organizationId` no payload varre uma org, sem ele varre todas as
+  elegíveis.
+- **O que a varredura enfileira (SQL, sem migração de metadata)**: contato
+  elegível cujo `metadata.google` (a) nunca foi tentado, (b) foi editado
+  depois da última tentativa (`updated_at > lastAttemptAt`) ou (c) tem
+  `lastError` com tentativa há mais de 1 h (backoff — erro permanente não
+  vira martelada a cada tick). `lastAttemptAt` é novo, gravado pelo
+  `syncContactToGoogle` em **todo** término (criou, atualizou, `unchanged`
+  ou falhou), porque `unchanged` hoje não grava nada e o contato voltaria a
+  ser "pendente" para sempre. Fallback `coalesce(lastAttemptAt, lastSyncedAt)`
+  cobre os contatos já sincronizados na 3a.
+- **Elegibilidade duplicada em SQL**: o pré-filtro SQL (`@c.us` com 8–15
+  dígitos ou e-mail não vazio) espelha `isEligible`; o JS continua sendo a
+  autoridade final e um teste de paridade impede divergência.
+- **Resumo do card em uma consulta** (`count(*) filter …` + `max`) em vez de
+  paginar todos os contatos no carregamento da página.
+- **Card**: contador de falhas (`lastError` presente) com faixa de aviso,
+  última sincronização e **última varredura automática**
+  (`external_connections.last_sweep_at`, gravado pelo cron).
+- **Higiene do TODO da 3b incluída**: cliente People reaproveitado dentro do
+  handler/varredura e `metadata.google` fora do navegador (dialog recebe só
+  as chaves do perfil). Pequenas e já listadas no TODO.
 
 ## Fontes consultadas
 
-Regra do projeto: decisão sobre biblioteca ou API externa se apoia em
-documentação atual da versão em uso, não em memória.
+Nenhuma API externa nova: a slice só reaproveita a People API e o pg-boss já
+mapeados no plano da 3a (`tasks/plan-google-sync-motor.done.md`).
 
-| Tema                  | Versão / alvo            | Fonte                                                                                                                              | Data       | O que confirmou                                                                                                                                                                                                                                                                                                                      |
-| --------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| People API (contatos) | REST v1                  | `developers.google.com/people/api/rest/v1/people/{updateContact,searchContacts,createContact,batch*}`                              | 2026-10-16 | etag/`failedPrecondition`, `updatePersonFields` substitutivo, mutates sequenciais, aquecimento, ≤200                                                                                                                                                                                                                                 |
-| OAuth do Google       | web server flow          | `developers.google.com/identity/protocols/oauth2/web-server`                                                                       | 2026-10-15 | state, refresh, `invalid_grant`, revoke, consentimento granular                                                                                                                                                                                                                                                                      |
-| pg-boss               | 12.35.0 (`package.json`) | tipos instalados `node_modules/pg-boss/dist/types.d.ts` (Context7 indisponível: chave inválida)                                    | 2026-10-16 | `policy: 'key_strict_fifo'`, `singletonKey`, `localConcurrency`, `retry*`, job `failed` segura chave                                                                                                                                                                                                                                 |
-| zod                   | 4.6.5 (`package.json`)   | Context7 `/colinhacks/zod` (API REST, chave nova)                                                                                  | 2026-10-16 | `z.httpUrl()` (= `z.url` http(s) + hostname de domínio), sem opção de credenciais → `.refine` com `new URL()`, refine devolve falso e nunca lança, mensagem via `{ error }`                                                                                                                                                          |
-| People API (cliente)  | REST v1                  | `developers.google.com/people/api/rest/v1/{people, people/get, people/updateContact, people/searchContacts, people/createContact}` | 2026-10-16 | `POST people:createContact`, `PATCH {people/*}:updateContact` (corpo com `metadata.sources` = type/id/etag lidos antes), `GET people:searchContacts?query&readMask&pageSize`, `GET {resourceName}?personFields`; `names[].unstructuredName`; `birthdays[].date{year,month,day}` (sempre `date`); `addresses[].formattedValue` aceito |
-| Erros das APIs Google | AIP-193/194              | `cloud.google.com/apis/design/errors`                                                                                              | 2026-10-16 | corpo `{error:{code,message,status}}` (`NOT_FOUND`, `RESOURCE_EXHAUSTED`…); retry com backoff para indisponibilidade/cota                                                                                                                                                                                                            |
-
-Context7 reconfigurado em 2026-10-16 (a chave antiga era inválida); as ferramentas MCP só valem após reiniciar a sessão, até lá consulta-se a API REST oficial do Context7.
-Novas dúvidas de API durante o build entram nesta tabela **antes** do código.
+| Tema                 | Versão / alvo            | Fonte                                                                                                                    | Data       | O que confirmou                                                                             |
+| -------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ---------- | ------------------------------------------------------------------------------------------- |
+| pg-boss              | 12.35.0 (`package.json`) | uso existente em `boss.ts`/`enqueue.ts` (`schedule`, `send`, `key_strict_fifo`)                                          | 2026-10-18 | cron e envio com `singletonKey` já em produção na 3a                                        |
+| pg-boss (`schedule`) | 12.35.0                  | tipos instalados `dist/index.d.ts` (`schedule(name, cron, data?, options?)`) e `types.d.ts` (`SendOptions.singletonKey`) | 2026-10-18 | `data` é opcional no `schedule`; `send` avulso com `singletonKey` na mesma fila é permitido |
+| People API           | REST v1                  | plano 3a (sequencial por usuário, 429/backoff)                                                                           | 2026-10-16 | a varredura continua enfileirando 1 job por contato na fila serial por org                  |
 
 ## Escopo
 
+- `packages/db/src/schema/external.ts`
+- `packages/db/migrations/**`
 - `packages/core/src/modules/contacts/**`
 - `packages/core/src/modules/external-connections/**`
 - `packages/automation/src/**`
+- `apps/web/src/server/actions/contacts.ts`
 - `apps/web/src/server/actions/external-connections.ts`
+- `apps/web/src/server/actions/external-connections.test.ts`
 - `apps/web/src/server/services.ts`
 - `apps/web/src/app/app/settings/channels/**`
+- `apps/web/src/app/app/contacts/**`
+- `apps/web/src/components/contact-*`
 - `apps/web/messages/pt-BR.json`
 - `apps/web/e2e/**`
 
 ## Fora de escopo
 
-- Gatilho automático nas edições, varredura periódica, uso de
-  `batchCreateContacts`/`batchUpdateContacts`, contadores avançados e faixa
-  de erro no card (plano 3b).
-- Pull / sincronização bidirecional, propagação de deletes, fotos, campos
-  custom, grupos/etiquetas (non-goals do spec).
-- Verificação do app no Google (fica para o fim do desenvolvimento).
-- Migrações de banco.
+- `batchCreateContacts` / `batchUpdateContacts` (decisão acima).
+- Pull / bidirecional, propagação de deletes, fotos, campos custom, grupos.
+- Gatilho a cada mensagem/ingest: contatos criados pelo ingest entram pela
+  varredura, não por evento.
+- Botão "Tentar de novo" dedicado: falhas voltam sozinhas pelo backoff de 1 h
+  e "Sincronizar agora" cobre o resto.
+- Sweep de jobs `failed` que seguram a chave da org (`shortcut` da 3a).
+- Verificação do app no Google (fim do desenvolvimento).
 
 ## Tarefas
 
-1. **Endurecer o perfil (pré-requisitos)** — o zod de `updateContactProfileInput`
-   (e a criação) rejeita caracteres de controle/bidi e `urls` com credenciais;
-   testes unitários e de integração.
-2. **Cliente da People API** — interface injetável (`searchByPhoneOrEmail`
-   com aquecimento, `createContact`, `getContact`, `updateContact` com etag)
-   sobre `fetch`, com backoff em 429/5xx e erros tipados; fake para testes;
-   `getValidAccessToken` no serviço (renova o token expirado, persiste, marca
-   `needs_reauth`).
-3. **Mapeamento Bosun → Person** — função pura: `names`, `phoneNumbers`,
-   `emailAddresses`, `organizations`, `addresses`, `biographies`, `birthdays`,
-   `urls`; regras de singleton, elegibilidade e hash do payload; testes
-   unitários.
-4. **Job `contact-google-sync`** — envia um contato: resolve a conexão
-   `connected`, usa `metadata.google.resourceName` ou procura candidatos (igualdade
-   exata de telefone/e-mail), cria ou atualiza com etag (uma releitura em
-   conflito), pula se o hash não mudou, grava `metadata.google` sem mexer em
-   `updated_at`; erro de um contato vira `lastError` e o job **conclui** (nunca
-   segura a chave); fila criada em `boss.ts` com `policy: 'key_strict_fifo'` e
-   envio sempre com `singletonKey`; teste de integração com o cliente falso.
-5. **Botão "Sincronizar agora" no card** — a action enfileira um job por
-   contato elegível (em páginas); o card mostra quantos estão prontos,
-   quantos já sincronizaram e a última sincronização; só `integrations:manage`
-   vê o botão; textos pt-BR.
+Detalhe, acceptance e verify em `tasks/todo.md`.
 
-Checkpoint após a tarefa 4: `pnpm verify` + integração verdes antes de tocar na
-UI. Cada tarefa fecha com um commit atômico.
+1. **Consentimento persistido** — migração `auto_sync_since` + `last_sweep_at`;
+   serviço marca/lê; desconectar zera por apagar a linha. Teste de isolamento
+   entre orgs.
+2. **Sync grava a tentativa + consulta de pendentes** — `lastAttemptAt` em todo
+   término; função SQL de contatos pendentes (elegibilidade espelhada, edição,
+   backoff de erro) com teste de paridade contra `isEligible`.
+3. **Varredura ponta a ponta** — fila + handler `contact-google-sweep`, cron
+   de 10 min, e o botão "Sincronizar agora" passa a marcar o consentimento e
+   enfileirar a varredura da org.
+4. **Gatilho nas edições** — criar/editar contato na UI enfileira o sync
+   (melhor esforço, nunca falha a edição) quando há consentimento.
+5. **Card: resumo em SQL, falhas e última varredura** — uma consulta agregada,
+   contador/faixa de falhas, data da última varredura, i18n, e2e.
+6. **Higiene** — cliente People único por varredura/handler; dialog de edição
+   sem `metadata.google`.
+7. **Docs e fechamento** — spec, `TODO.md`, `docs/development` se tocar jobs.
 
-Checkpoint final: teste manual no staging com o Google real (o usuário faz o
-consentimento, eu leio os logs pelo Coolify se algo falhar).
-
-Detalhe de acceptance + verify por task em `tasks/todo.md`.
+Checkpoints: após a tarefa 3 (motor automático funcionando no staging com o
+botão) e após a 5 (card completo, `verify:full`).
 
 ## Riscos
 
-| Risco                                                         | Impacto | Mitigação                                                                               |
-| ------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------- |
-| Duplicar contatos no Google (match fraco)                     | Alto    | `searchContacts` é por prefixo: conferir igualdade exata de E.164/e-mail antes de criar |
-| Sobrescrever edição feita no Google (etag)                    | Médio   | Atualizar só com `updatePersonFields` explícito; conflito → reler uma vez e reaplicar   |
-| Upload em massa para a conta errada                           | Alto    | Nada é enviado ao conectar; só o botão, que mostra a conta e a contagem                 |
-| Cota/429 da People API                                        | Médio   | Backoff exponencial no cliente; fila sequencial; cota por projeto (cada org tem a sua)  |
-| Dados pessoais (endereço, aniversário) saindo do Bosun (LGPD) | Médio   | Decisão registrada do usuário; envio só após o botão; nota no spec                      |
-| Token revogado no meio da execução                            | Médio   | `invalid_grant` → `needs_reauth`, jobs seguintes não fazem nada                         |
-| Caracteres de controle/bidi chegando ao Google                | Baixo   | Tarefa 1 rejeita no zod antes de qualquer envio                                         |
+| Risco                                                                                    | Impacto | Mitigação                                                                                                    |
+| ---------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| Backlog grande: o cron reenfileira contatos que ainda estão na fila                      | Média   | Job é idempotente (hash); cap por varredura; `shortcut:` documentado; revisitar se a fila crescer no staging |
+| Pré-filtro SQL diverge de `isEligible`                                                   | Média   | Teste de paridade com casos de borda (`@lid`, e-mail em branco, 7/16 dígitos)                                |
+| Erro permanente (ex.: dado recusado pelo Google) gera tentativa a cada hora, para sempre | Baixa   | Backoff de 1 h, contador visível no card; sem retry imediato                                                 |
+| Migração em tabela com RLS                                                               | Baixa   | Só colunas nullable; checklist de RLS/grants do CLAUDE.md revisado; `verify:full`                            |
+| Cron varre org com conexão `needs_reauth`                                                | Baixa   | Filtra `status = connected`; o sync já não faz nada sem token                                                |
+| Edição enfileira e a fila está indisponível                                              | Baixa   | Melhor esforço + `captureException`; a varredura cobre depois                                                |
 
 ## Critérios de pronto
 
-- [x] `pnpm verify` verde
-- [x] `pnpm verify:full` verde (toca job, banco e UI)
-- [x] Testes: elegibilidade, mapeamento (singletons), igualdade exata no match,
-      conflito de etag, 429 com backoff, token revogado, hash sem mudança =
-      sem chamada ao Google
-- [ ] Teste manual no staging: Sincronizar agora cria os contatos no Google e
-      repetir não duplica
-- [x] Docs atualizadas: `docs/product/contacts-google-sync.md` (LGPD, botão,
-      fila sequencial) e `docs/domains` se mudar o modelo
-- [x] `TODO.md`: slice 3a concluída, 3b listada
+- [ ] `pnpm verify` verde
+- [ ] `pnpm verify:full` verde (toca banco, job e UI)
+- [ ] Testes: paridade de elegibilidade, pendentes (nunca tentado / editado /
+      erro com backoff), consentimento isolado por org, handler da varredura
+      (cap, org sem consentimento ignorada), gatilho da edição, resumo SQL
+- [ ] Teste manual no staging: editar um contato sincroniza sozinho; criar
+      contato pelo ingest aparece após a varredura; falha forçada mostra a
+      faixa e o contador
+- [ ] Docs atualizadas: `docs/product/contacts-google-sync.md`
+- [ ] `TODO.md`: slice 3b concluída

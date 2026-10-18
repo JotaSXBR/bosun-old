@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 
 import type { Database } from "@crm/db";
-import { withTenant } from "@crm/db";
+import { withServiceAccess, withTenant } from "@crm/db";
 import { captureException } from "@crm/observability";
 
 import { DomainError, NotFoundError } from "../../errors";
@@ -14,6 +14,7 @@ import type { ExternalConnectionPublic, ExternalConnectionRow } from "./reposito
 import {
   deleteConnection,
   findConnection,
+  listAutoSyncOrganizationIds,
   toPublic,
   updateConnection,
   upsertConnection,
@@ -268,6 +269,41 @@ export async function markGoogleNeedsReauth(
 }
 
 /**
+ * Requires integrations:manage and a `connected` account. Records the user's
+ * consent to automatic sync (the first "Sincronizar agora"); repeating keeps
+ * the original date. Disconnecting deletes the row, so consent never outlives it.
+ */
+export async function enableGoogleAutoSync(db: Database, ctx: TenantContext): Promise<void> {
+  assertPermission(ctx, { integrations: ["manage"] });
+  await withTenant(db, ctx.organizationId, async (tx) => {
+    const row = await findConnection(tx, ctx.organizationId, PROVIDER);
+    if (row?.status !== "connected") {
+      throw new DomainError("GOOGLE_NOT_CONNECTED", "Nenhuma conta Google conectada.");
+    }
+    if (!row.autoSyncSince) await updateConnection(tx, row.id, { autoSyncSince: new Date() });
+  });
+}
+
+/** Internal — trusted system path (jobs, actions after their own permission check). */
+export async function isGoogleAutoSyncActive(
+  db: Database,
+  organizationId: string,
+): Promise<boolean> {
+  const row = await withTenant(db, organizationId, (tx) =>
+    findConnection(tx, organizationId, PROVIDER),
+  );
+  return row?.status === "connected" && row.autoSyncSince !== null;
+}
+
+/** Internal — stamps the end of an automatic sweep for the card. */
+export async function markGoogleSweepAt(db: Database, organizationId: string): Promise<void> {
+  await withTenant(db, organizationId, async (tx) => {
+    const row = await findConnection(tx, organizationId, PROVIDER);
+    if (row) await updateConnection(tx, row.id, { lastSweepAt: new Date() });
+  });
+}
+
+/**
  * Requires integrations:manage. Removes the connection, then revokes the
  * refresh token at Google (best effort: a failed revoke never blocks the
  * local disconnect). Contacts already pushed stay in the Google account.
@@ -303,4 +339,9 @@ export async function getGoogleStatus(
     findConnection(tx, ctx.organizationId, PROVIDER),
   );
   return row ? toPublic(row) : null;
+}
+
+/** Internal — the cron sweep's work list (cross-tenant by design). */
+export async function listGoogleAutoSyncOrganizationIds(db: Database): Promise<string[]> {
+  return withServiceAccess(db, (tx) => listAutoSyncOrganizationIds(tx, PROVIDER));
 }

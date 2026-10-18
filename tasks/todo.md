@@ -1,84 +1,109 @@
-# Todo — Google Contacts: motor de sync (3a)
+# Todo — Google Contacts: sync automático (3b)
 
 Plano: `tasks/plan.md`.
 
-## Task 1: Endurecer o perfil do contato
+## Task 1: Consentimento persistido
 
-- [x] `updateContactProfileInput` e `createContactInput` rejeitam caracteres de
-      controle (exceto `\n` em `address`/`notes`) e marcas bidi em
-      `displayName`, `company`, `jobTitle`, `address`, `notes`
-- [x] `urls` rejeita credenciais embutidas (`https://user:pass@host`)
-- [x] Testes unitários (`schemas.test.ts`) e de integração (nada é gravado)
-- **Acceptance**: valores com NUL, `\r` ou bidi são recusados; `https://acme.test`
-  continua válido; `https://u:p@acme.test` é recusado
-- **Verify**: `pnpm --filter @crm/core test` · integração dos contatos
+- [x] Colunas nullable `external_connections.auto_sync_since` e
+      `last_sweep_at` (schema + migração gerada e revisada)
+- [x] Serviço: marcar o consentimento (idempotente, mantém a data original) e
+      ler "auto-sync ativo" (`connected` + marcador)
+- [x] Desconectar apaga a linha → consentimento some
+- [x] Teste de integração: marcar na org A não habilita a org B
+- **Acceptance**: sem marcador a org não aparece como elegível a sync
+  automático; marcar duas vezes não muda a data
+- **Verify**: `pnpm db:generate` (revisar SQL) · `pnpm db:migrate` ·
+  `pnpm --filter @crm/core test:integration` do módulo
 - **Deps**: nenhuma · **Tamanho**: S
 
-## Task 2: Cliente da People API
+## Task 2: Tentativa gravada + consulta de pendentes
 
-- [x] Interface `GooglePeopleClient`: `searchByPhoneOrEmail` (com aquecimento
-      único), `createContact`, `getContact`, `updateContact` (etag +
-      `updatePersonFields`)
-- [x] Backoff em 429/5xx (injeção de `sleep` para teste), erros tipados
-      (`failedPrecondition`, `unauthorized`, `rate_limited`)
-- [x] `getValidAccessToken(db, ctx)` no serviço: renova o token expirado,
-      persiste, `invalid_grant` → `needs_reauth`
-- [x] Fake para testes; testes com `fetch` falso
-- **Acceptance**: URLs/parâmetros batem com a doc; 429 repete com backoff e
-  desiste após N; 400 `failedPrecondition` vira erro tipado; token expirado é
-  renovado antes da chamada
-- **Verify**: `pnpm --filter @crm/core test` · integração do serviço
-- **Deps**: nenhuma · **Tamanho**: M
+- [x] `syncContactToGoogle` grava `lastAttemptAt` em todo término (criou,
+      atualizou, `unchanged`, falhou) sem tocar `updated_at`; sucesso
+      continua limpando `lastError`
+- [x] Repositório: `listPendingGoogleSyncContacts(org, { after, limit })` em
+      SQL — elegível (pré-filtro) E (nunca tentado OU `updated_at` >
+      `coalesce(lastAttemptAt, lastSyncedAt)` OU `lastError` com tentativa > 1 h), ordenado por id
+- [x] Teste de paridade: o pré-filtro SQL e `isEligible` concordam em
+      `@c.us` (7/8/15/16 dígitos), `@lid`, visitante do site, e-mail em
+      branco
+- **Acceptance**: contato `unchanged` deixa de ser pendente; contato com erro
+  recente não aparece, com erro antigo aparece; contato editado aparece
+- **Verify**: `pnpm --filter @crm/core test` · integração
+  `google-contact-sync.int.test.ts` e do repositório
+- **Deps**: 1 · **Tamanho**: M
 
-## Task 3: Mapeamento Bosun → Person
+## Task 3: Varredura ponta a ponta
 
-- [x] `toPerson(contact)` puro: `names`, `phoneNumbers` (canal + `phone`),
-      `emailAddresses`, `organizations`, `addresses`, `biographies`,
-      `birthdays`, `urls`
-- [x] `isEligible(contact)` e `payloadHash(person)` (sha256 do JSON canônico)
-- **Acceptance**: no máximo um valor em `names`/`birthdays`/`biographies`;
-  sem telefone `@c.us` nem e-mail → inelegível; nome ausente → sem `names`;
-  mesmo contato → mesmo hash; campo alterado → hash diferente
-- **Verify**: `pnpm --filter @crm/core test`
-- **Deps**: nenhuma · **Tamanho**: M
+- [x] Confirmar no pg-boss 12.35.0 (tipos instalados) `schedule` sem payload +
+      `send` avulso na mesma fila; registrar em "Fontes consultadas"
+- [x] Fila `contact-google-sweep`, handler com `organizationId` opcional:
+      lista orgs com auto-sync ativo, pagina os pendentes (cursor por id),
+      `enqueueContactGoogleSync` por contato (cap por execução), grava
+      `last_sweep_at`; erro de uma org não derruba as outras
+- [x] `schedule` a cada 10 min em `boss.ts`
+- [x] `syncGoogleContactsAction`: marca o consentimento e enfileira a
+      varredura da org (remove o laço sequencial da requisição); mantém
+      cooldown e permissão `integrations:manage`
+- [x] Handler e ação testados (org sem consentimento ignorada; conexão
+      `needs_reauth` ignorada; fila indisponível devolve erro claro)
+- **Acceptance**: clicar no botão em staging sincroniza a base inteira sem
+  segurar a requisição; o cron repete sem duplicar contatos no Google
+- **Verify**: `pnpm --filter @crm/automation test` · `pnpm --filter
+@crm/web test` · `pnpm verify`
+- **Deps**: 1, 2 · **Tamanho**: M
 
-### Checkpoint: após as tarefas 1–3
+### Checkpoint: após a tarefa 3
 
-- [x] `pnpm verify` verde · revisar com o humano
+- [x] `pnpm verify` e integração verdes
+- [x] Staging: botão + varredura sincronizam; segundo tick não cria duplicata
+- [x] Revisar com o humano antes de seguir
 
-## Task 4: Job `contact-google-sync`
+## Task 4: Gatilho nas edições
 
-- [x] `contactGoogleSyncHandler({ organizationId, contactId })`: conexão
-      `connected`, token válido, `resourceName` conhecido ou busca com igualdade
-      exata, create/update com etag (uma releitura), pula se o hash não mudou
-- [x] Grava `metadata.google` (`resourceName`, `etag`, `payloadHash`,
-      `lastSyncedAt`) sem alterar `updated_at`
-- [x] Fila criada em `boss.ts` com `policy: 'key_strict_fifo'` + `enqueueContactGoogleSync`
-      sempre com `singletonKey: google:<organizationId>`; erro de um contato
-      grava `lastError` e conclui o job (nunca deixa `failed`)
-- [x] Teste de integração com o cliente falso (criar, atualizar, sem mudança,
-      conflito de etag, token revogado, sem conexão = no-op)
-- **Acceptance**: sem conexão `connected` nada é chamado; repetir o job não
-  duplica nem chama o Google; `invalid_grant` marca `needs_reauth`
-- **Verify**: integração do job · `pnpm verify`
+- [x] `createContactAction` e `updateContactProfileAction`, após sucesso,
+      enfileiram `contact-google-sync` quando o auto-sync está ativo
+- [x] Melhor esforço: falha da fila vira `captureException`, a edição segue ok
+- [x] Teste de ação: com consentimento enfileira; sem consentimento não;
+      fila fora do ar não quebra a edição
+- **Acceptance**: editar o cargo de um contato sincronizado atualiza o Google
+  em segundos, sem clicar em nada
+- **Verify**: `pnpm --filter @crm/web test`
+- **Deps**: 1, 3 · **Tamanho**: S
+
+## Task 5: Card — resumo em SQL, falhas e última varredura
+
+- [x] Resumo em uma consulta agregada (elegíveis, sincronizados, falhas,
+      última sincronização) no lugar da paginação de todos os contatos
+- [x] `GoogleSyncView` ganha `failed` e `lastSweepAt`; faixa de aviso quando
+      `failed > 0` e linha "última varredura"; textos em `pt-BR.json`
+- [x] Teste de integração do resumo (mesma regra de elegibilidade) e e2e do
+      card (`apps/web/e2e`)
+- **Acceptance**: base com 2 falhas mostra "2 contatos com erro"; a página
+  carrega com uma consulta, não com N páginas
+- **Verify**: `pnpm --filter @crm/core test:integration` · `pnpm --filter
+@crm/web exec playwright test e2e/<arquivo> --reporter=line`
 - **Deps**: 2, 3 · **Tamanho**: M
 
-### Checkpoint: após a tarefa 4
+### Checkpoint: após a tarefa 5
 
-- [ ] `pnpm verify` e integração verdes · revisar com o humano
+- [x] `pnpm verify:full` verde
+- [x] Staging: editar contato, criar via ingest, forçar uma falha
+- [x] Revisar com o humano antes de fechar
 
-## Task 5: Botão "Sincronizar agora" no card
+## Task 6: Higiene
 
-- [x] Action `syncGoogleContactsAction` (manage) enfileira um job por contato
-      elegível, em páginas
-- [x] Card mostra elegíveis / sincronizados / última sincronização e o botão
-- [x] Textos pt-BR; só `integrations:manage` vê o botão
-- **Acceptance**: o clique enfileira N jobs e o card atualiza; sem conexão o
-  botão não aparece; viewer não vê o botão
-- **Verify**: `pnpm verify` · integração da action · teste manual no staging
-- **Deps**: 4 · **Tamanho**: M
+- [x] Cliente People criado uma vez por varredura/handler e reaproveitado
+- [x] Dialog de edição recebe só as chaves do perfil, não `metadata.google`
+- **Acceptance**: `metadata.google` não aparece no payload enviado ao
+  navegador; testes existentes seguem verdes
+- **Verify**: `pnpm --filter @crm/web test` · `pnpm typecheck`
+- **Deps**: 3 · **Tamanho**: S
 
-### Checkpoint: final
+## Task 7: Docs e fechamento
 
-- [ ] `pnpm verify:full` verde · teste manual no staging com o Google real ·
-      critérios de pronto marcados · review e ship
+- [x] `docs/product/contacts-google-sync.md`: seção "Slice 3b — implemented"
+      (consentimento, varredura, backoff, limites restantes)
+- [x] `TODO.md`: slice 3b concluída; Calendar/Gmail seguem como próximos
+- [x] `pnpm verify:full` · review (`code-review-and-quality`) · commit local
+- **Deps**: 1–6 · **Tamanho**: XS

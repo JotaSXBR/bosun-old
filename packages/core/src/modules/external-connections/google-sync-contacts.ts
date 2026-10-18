@@ -4,50 +4,29 @@ import { withTenant } from "@crm/db";
 import { DomainError } from "../../errors";
 import type { TenantContext } from "../../tenant/context";
 import { assertPermission } from "../../tenant/context";
-import { pageContactsForSync } from "../contacts";
+import {
+  listPendingGoogleSyncContacts,
+  pageContactsForSync,
+  summarizeGoogleSync,
+} from "../contacts";
 import { isEligible } from "./google-contact-map";
 import { getGoogleStatus } from "./service";
-
-const SCAN_PAGE = 500;
 
 export type GoogleSyncSummary = {
   eligible: number;
   synced: number;
+  failed: number;
   lastSyncedAt: string | null;
 };
 
-const lastSyncedOf = (metadata: Record<string, unknown>): string | null => {
-  const google = metadata.google as { lastSyncedAt?: unknown } | undefined;
-  return typeof google?.lastSyncedAt === "string" ? google.lastSyncedAt : null;
-};
-
 /**
- * Requires integrations:read. How many contacts the Google mirror covers
- * (same `isEligible` rule the job applies), how many were already sent and
- * when the latest send happened. Scans the org's contacts page by page.
+ * Requires integrations:read. One aggregate query: contacts the Google mirror
+ * covers (coarse SQL form of `isEligible`), how many were sent, how many are
+ * in error, and when the latest send happened.
  */
-export async function getGoogleSyncSummary(
-  db: Database,
-  ctx: TenantContext,
-): Promise<GoogleSyncSummary> {
+export function getGoogleSyncSummary(db: Database, ctx: TenantContext): Promise<GoogleSyncSummary> {
   assertPermission(ctx, { integrations: ["read"] });
-  const summary: GoogleSyncSummary = { eligible: 0, synced: 0, lastSyncedAt: null };
-  let after: string | undefined;
-  for (;;) {
-    const page = await withTenant(db, ctx.organizationId, (tx) =>
-      pageContactsForSync(tx, ctx.organizationId, { after, limit: SCAN_PAGE }),
-    );
-    for (const contact of page) {
-      if (!isEligible(contact)) continue;
-      summary.eligible += 1;
-      const syncedAt = lastSyncedOf(contact.metadata);
-      if (!syncedAt) continue;
-      summary.synced += 1;
-      if (!summary.lastSyncedAt || syncedAt > summary.lastSyncedAt) summary.lastSyncedAt = syncedAt;
-    }
-    if (page.length < SCAN_PAGE) return summary;
-    after = page[page.length - 1]!.id;
-  }
+  return withTenant(db, ctx.organizationId, (tx) => summarizeGoogleSync(tx, ctx.organizationId));
 }
 
 /**
@@ -67,6 +46,24 @@ export async function listGoogleSyncContactIds(
   }
   const page = await withTenant(db, ctx.organizationId, (tx) =>
     pageContactsForSync(tx, ctx.organizationId, options),
+  );
+  return {
+    ids: page.filter(isEligible).map((contact) => contact.id),
+    next: page.length < options.limit ? null : page[page.length - 1]!.id,
+  };
+}
+
+/**
+ * System entry for the sweep (no user context): one page of eligible contact ids
+ * that still need a Google send. The SQL filter is coarse; `isEligible` decides.
+ */
+export async function listPendingGoogleSyncContactIds(
+  db: Database,
+  organizationId: string,
+  options: { after?: string | undefined; limit: number },
+): Promise<{ ids: string[]; next: string | null }> {
+  const page = await withTenant(db, organizationId, (tx) =>
+    listPendingGoogleSyncContacts(tx, organizationId, options),
   );
   return {
     ids: page.filter(isEligible).map((contact) => contact.id),

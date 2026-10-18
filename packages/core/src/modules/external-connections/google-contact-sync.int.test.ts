@@ -163,6 +163,10 @@ describe("syncContactToGoogle", () => {
     calls.length = 0;
     expect(await run()).toBe("unchanged");
     expect(calls).toEqual([]);
+    // The no-op still stamps the attempt, so the sweep stops treating the contact as pending.
+    const checked = (await stored(id)).metadata.google as Record<string, string>;
+    expect(checked.lastAttemptAt! >= checked.lastSyncedAt!).toBe(true);
+    expect(checked.payloadHash).toBeDefined();
 
     await withTenant(db, orgId, (tx) =>
       tx.update(contacts).set({ displayName: "Bia Souza" }).where(eq(contacts.id, id)),
@@ -263,6 +267,7 @@ describe("syncContactToGoogle", () => {
       resourceName: "people/c1",
       lastError: "rate_limited",
     });
+    expect((await stored(id)).metadata.google).toHaveProperty("lastAttemptAt");
   });
 
   it("marks the connection needs_reauth when the token is revoked, and sends nothing", async () => {

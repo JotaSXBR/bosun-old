@@ -1,0 +1,2 @@
+ALTER TABLE "external_connections" ADD COLUMN "auto_sync_since" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "external_connections" ADD COLUMN "last_sweep_at" timestamp with time zone;

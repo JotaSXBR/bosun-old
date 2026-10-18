@@ -158,6 +158,28 @@ google:<organizationId>` — one Google mutation at a time per org. The
   of all contacts on page load, no failed counter in the card, Google write
   quota (429) can leave contacts in `lastError` on very large bases.
 
+### Slice 3b — implemented (automatic sync)
+
+- **Consent**: the first "Sincronizar agora" click stores
+  `external_connections.auto_sync_since`. Edits and the sweep only run for a
+  `connected` account with that marker; disconnecting (row deleted) or saving
+  the OAuth client again clears it, so the next send needs a new click.
+- **Sweep**: job `contact-google-sweep` (cron every 10 min; the button queues
+  it for one org). It enqueues one `contact-google-sync` job per pending
+  contact — never tried, edited after the last attempt, or with `lastError`
+  and an attempt older than 1 h (error backoff) — capped per run, and stamps
+  `last_sweep_at`. No `batch*Contacts`: one job per contact keeps errors
+  isolated and the per-org FIFO order.
+- **Edit trigger**: creating/editing a contact in the UI enqueues its sync
+  (best effort; a queue failure never fails the edit — the sweep catches up).
+- **`lastAttemptAt`**: written on every outcome (including `unchanged`) so an
+  unchanged contact stops being pending; `updated_at` is still untouched.
+- **Card**: one aggregate SQL query (eligible, synced, failed, last sync),
+  failure banner and last sweep time. The SQL eligibility filter mirrors
+  `isEligible` (parity test); the JS rule stays authoritative for sending.
+- **Known limits**: contacts created by ingest reach Google on the next sweep
+  (up to ~10 min); the card may count an edge-case contact the job later skips.
+
 ## Non-goals (later slices)
 
 - **Pull / bidirectional** — import existing Google contacts, remote
