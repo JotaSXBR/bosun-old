@@ -34,11 +34,11 @@ function ctx(organizationId: string, role: TenantContext["role"]): TenantContext
 }
 
 async function openConversation(
-  org: string,
-  conn: ConnectionRef,
+  target: { org: string; conn: ConnectionRef },
   chatId: string,
   messageCount = 1,
 ) {
+  const { org, conn } = target;
   for (let i = 1; i <= messageCount; i++) {
     await withTenant(db, org, (tx) =>
       ingestChannelEvent(tx, conn, {
@@ -142,7 +142,7 @@ const fakeDraft = () =>
 
 describe("generateDraftHandler", () => {
   it("skips silently when the org has no LLM credential", async () => {
-    const convId = await openConversation(orgA, connA, "nokey-draft@c.us");
+    const convId = await openConversation({ org: orgA, conn: connA }, "nokey-draft@c.us");
     const result = await generateDraftHandler({
       organizationId: orgA,
       conversationId: convId,
@@ -153,7 +153,7 @@ describe("generateDraftHandler", () => {
   });
 
   it("persists a pending draft, records usage, lazily creates the drafter agent", async () => {
-    const convId = await openConversation(orgB, connB, "keyed-draft@c.us");
+    const convId = await openConversation({ org: orgB, conn: connB }, "keyed-draft@c.us");
     await createLlmCredential(db, ctx(orgB, "admin"), {
       provider: "openrouter",
       apiKey: "sk-or-draft-test",
@@ -187,7 +187,7 @@ describe("generateDraftHandler", () => {
   });
 
   it("regeneration supersedes the previous pending draft", async () => {
-    const convId = await openConversation(orgB, connB, "regen-draft@c.us");
+    const convId = await openConversation({ org: orgB, conn: connB }, "regen-draft@c.us");
 
     await generateDraftHandler(
       { organizationId: orgB, conversationId: convId, mode: "suggest" },
@@ -212,7 +212,7 @@ describe("generateDraftHandler", () => {
   });
 
   it("sends the 40 most recent messages as the transcript, not the first 40", async () => {
-    const convId = await openConversation(orgB, connB, "tail-draft@c.us", 45);
+    const convId = await openConversation({ org: orgB, conn: connB }, "tail-draft@c.us", 45);
     let transcript: string[] = [];
     await generateDraftHandler(
       { organizationId: orgB, conversationId: convId, mode: "suggest" },

@@ -30,21 +30,9 @@ const MAX_PER_ORG = 500;
 export async function contactGoogleSweepHandler(
   payload: unknown,
 ): Promise<{ orgs: number; queued: number }> {
-  const parsed = contactGoogleSweepPayload.safeParse(payload ?? {});
   const db = getDb();
   const totals = { orgs: 0, queued: 0 };
-  let organizationIds: string[];
-  try {
-    organizationIds = parsed.success
-      ? parsed.data.organizationId
-        ? [parsed.data.organizationId]
-        : await listGoogleAutoSyncOrganizationIds(db)
-      : [];
-  } catch (error) {
-    logger.warn("contact-google-sweep: listing orgs failed", { error: errorName(error) });
-    return totals;
-  }
-  for (const organizationId of organizationIds) {
+  for (const organizationId of await targetOrganizations(payload)) {
     try {
       if (!(await isGoogleAutoSyncActive(db, organizationId))) continue;
       totals.orgs += 1;
@@ -59,27 +47,53 @@ export async function contactGoogleSweepHandler(
   return totals;
 }
 
+/** The payload's org, or every org that consented; an unusable payload or listing sweeps nothing. */
+async function targetOrganizations(payload: unknown): Promise<string[]> {
+  const parsed = contactGoogleSweepPayload.safeParse(payload ?? {});
+  if (!parsed.success) return [];
+  if (parsed.data.organizationId) return [parsed.data.organizationId];
+  try {
+    return await listGoogleAutoSyncOrganizationIds(getDb());
+  } catch (error) {
+    logger.warn("contact-google-sweep: listing orgs failed", { error: errorName(error) });
+    return [];
+  }
+}
+
 async function sweepOrganization(organizationId: string): Promise<number> {
-  const db = getDb();
   await clearFailedGoogleSyncJobs(organizationId);
+  const { queued, stopped } = await enqueuePending(organizationId);
+  if (!stopped) await markGoogleSweepAt(getDb(), organizationId);
+  return queued;
+}
+
+/** Pages through the pending contacts up to the per-run cap; `stopped` = jobs layer down. */
+async function enqueuePending(
+  organizationId: string,
+): Promise<{ queued: number; stopped: boolean }> {
   let queued = 0;
-  let after: string | undefined;
-  while (queued < MAX_PER_ORG) {
-    const page = await listPendingGoogleSyncContactIds(db, organizationId, {
-      after,
-      limit: PAGE_SIZE,
-    });
-    for (const contactId of page.ids) {
-      if (queued >= MAX_PER_ORG) break;
-      const { skipped } = await enqueueContactGoogleSync({ organizationId, contactId });
-      if (skipped) return queued; // jobs layer down: the next tick retries
-      queued += 1;
-    }
-    if (!page.next) break;
+  let after: string | null | undefined;
+  while (queued < MAX_PER_ORG && after !== null) {
+    const page = await sweepPage(organizationId, after, MAX_PER_ORG - queued);
+    queued += page.queued;
+    if (page.stopped) return { queued, stopped: true }; // the next tick retries
     after = page.next;
   }
-  await markGoogleSweepAt(db, organizationId);
-  return queued;
+  return { queued, stopped: false };
+}
+
+async function sweepPage(organizationId: string, after: string | undefined, budget: number) {
+  const page = await listPendingGoogleSyncContactIds(getDb(), organizationId, {
+    after,
+    limit: PAGE_SIZE,
+  });
+  let queued = 0;
+  for (const contactId of page.ids.slice(0, budget)) {
+    const { skipped } = await enqueueContactGoogleSync({ organizationId, contactId });
+    if (skipped) return { queued, next: page.next, stopped: true };
+    queued += 1;
+  }
+  return { queued, next: page.next, stopped: false };
 }
 
 // Drizzle errors embed SQL params (contact data): log only the class.

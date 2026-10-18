@@ -167,6 +167,26 @@ async function attempt(ctx: AttemptCtx, cred: Credential): Promise<void> {
   }
 }
 
+/** Tries each credential in order; the first success wins, otherwise the last error is thrown. */
+async function tryCredentials(ctx: AttemptCtx, credentials: Credential[]): Promise<void> {
+  let lastError: unknown;
+  for (const cred of credentials) {
+    try {
+      await attempt(ctx, cred);
+      return;
+    } catch (error) {
+      logger.warn("draft credential attempt failed", {
+        organizationId: ctx.organizationId,
+        provider: cred.provider,
+        model: cred.model,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 /**
  * Generates one pending draft suggestion for a conversation. Runs the
  * org's drafter agent config (lazy-created on first use) over the recent
@@ -194,20 +214,6 @@ export async function generateDraftHandler(
     draftInput: prepared.draftInput,
     draft: deps?.draft ?? draftReply,
   };
-  let lastError: unknown;
-  for (const cred of prepared.credentials) {
-    try {
-      await attempt(attemptCtx, cred);
-      return { drafted: true };
-    } catch (error) {
-      logger.warn("draft credential attempt failed", {
-        organizationId: parsed.organizationId,
-        provider: cred.provider,
-        model: cred.model,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      lastError = error;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  await tryCredentials(attemptCtx, prepared.credentials);
+  return { drafted: true };
 }
