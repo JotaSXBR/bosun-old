@@ -8,7 +8,7 @@ import { getDb } from "@crm/db";
 import { createLogger } from "@crm/observability";
 import { z } from "zod";
 
-import { enqueueContactGoogleSync } from "../enqueue";
+import { clearFailedGoogleSyncJobs, enqueueContactGoogleSync } from "../enqueue";
 
 const logger = createLogger({ bindings: { component: "contact-google-sweep" } });
 
@@ -61,6 +61,7 @@ export async function contactGoogleSweepHandler(
 
 async function sweepOrganization(organizationId: string): Promise<number> {
   const db = getDb();
+  await clearFailedGoogleSyncJobs(organizationId);
   let queued = 0;
   let after: string | undefined;
   while (queued < MAX_PER_ORG) {

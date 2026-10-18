@@ -14,6 +14,7 @@ import {
   disconnectGoogle,
   enableGoogleAutoSync,
   isGoogleAutoSyncActive,
+  listGoogleAutoSyncOrganizationIds,
   markGoogleSweepAt,
   saveGoogleClient,
 } from "./service";
@@ -150,6 +151,26 @@ describe("google auto-sync consent", () => {
     const row = (await readRow(orgId))!;
     expect(row.autoSyncSince).toBeNull();
     expect(row.lastSweepAt).toBeNull();
+  });
+
+  it("lists only connected orgs that consented", async () => {
+    await connect();
+    await connect(otherOrgId);
+    await enableGoogleAutoSync(db, ctx("admin"));
+    const listed = await listGoogleAutoSyncOrganizationIds(db);
+    expect(listed).toContain(orgId);
+    expect(listed).not.toContain(otherOrgId); // connected, no consent
+
+    await enableGoogleAutoSync(db, ctx("admin", otherOrgId));
+    await withTenant(db, otherOrgId, (tx) =>
+      tx
+        .update(externalConnections)
+        .set({ status: "needs_reauth" })
+        .where(eq(externalConnections.organizationId, otherOrgId)),
+    );
+    const afterReauth = await listGoogleAutoSyncOrganizationIds(db);
+    expect(afterReauth).toContain(orgId);
+    expect(afterReauth).not.toContain(otherOrgId);
   });
 
   it("stamps the sweep time", async () => {

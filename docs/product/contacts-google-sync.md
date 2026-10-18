@@ -177,6 +177,12 @@ google:<organizationId>` — one Google mutation at a time per org. The
 - **Card**: one aggregate SQL query (eligible, synced, failed, last sync),
   failure banner and last sweep time. The SQL eligibility filter mirrors
   `isEligible` (parity test); the JS rule stays authoritative for sending.
+- **Hardening (ship review)**: `syncContactToGoogle` re-checks consent (a job
+  queued before a disconnect sends nothing); `lastAttemptAt` is taken before
+  reading the contact so a mid-sync edit stays pending; the sweep deletes
+  `failed` jobs of the org's `key_strict_fifo` key (they would hold it
+  forever) before queueing; the confirmation dialog says edits are sent
+  automatically and that disconnecting stops it (no pause switch yet).
 - **Known limits**: contacts created by ingest reach Google on the next sweep
   (up to ~10 min); the card may count an edge-case contact the job later skips.
 

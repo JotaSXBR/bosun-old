@@ -145,7 +145,7 @@ export async function enqueueContactGoogleSync(
 
 /**
  * Queues a Google sweep for one org (the "Sincronizar agora" button). The
- * singleton key keeps repeated clicks from stacking sweeps; the cron sweep is
+ * singleton window drops repeated clicks within a minute; the cron sweep is
  * scheduled in boss.ts and needs no enqueue.
  */
 export async function enqueueContactGoogleSweep(payload: {
@@ -159,6 +159,21 @@ export async function enqueueContactGoogleSweep(payload: {
   }
   await boss.send(QUEUES.contactGoogleSweep, payload, {
     singletonKey: `google-sweep:${payload.organizationId}`,
+    singletonSeconds: 60,
+    expireInSeconds: 900,
   });
   return { skipped: false };
+}
+
+/**
+ * A `failed` job holds its `key_strict_fifo` key and would freeze the org's
+ * Google queue for good; the sweep drops them (the contacts come back from
+ * their metadata) before queueing more.
+ */
+export async function clearFailedGoogleSyncJobs(organizationId: string): Promise<void> {
+  const boss = getBoss();
+  if (!boss) return;
+  const jobs = await boss.findJobs(QUEUES.contactGoogleSync, { key: `google:${organizationId}` });
+  const failed = jobs.filter((job) => job.state === "failed").map((job) => job.id);
+  if (failed.length > 0) await boss.deleteJob(QUEUES.contactGoogleSync, failed);
 }

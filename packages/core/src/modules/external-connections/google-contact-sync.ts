@@ -14,7 +14,7 @@ import type { GoogleOAuthClient } from "./google-oauth";
 import { GoogleOAuthError } from "./google-oauth";
 import type { GooglePeopleClient, GooglePerson, GooglePersonInput } from "./google-people";
 import { createGooglePeopleClient, GooglePeopleError } from "./google-people";
-import { getGoogleAccessToken, markGoogleNeedsReauth } from "./service";
+import { getGoogleAccessToken, isGoogleAutoSyncActive, markGoogleNeedsReauth } from "./service";
 
 export type GoogleSyncOutcome = "created" | "updated" | "unchanged" | "skipped" | "failed";
 
@@ -96,6 +96,10 @@ export async function syncContactToGoogle(
   deps: { oauth?: GoogleOAuthClient; people?: GooglePeopleClient } = {},
 ): Promise<GoogleSyncOutcome> {
   const { organizationId, contactId } = input;
+  // Consent is re-checked here: a job queued before a disconnect/reconnect must not send.
+  if (!(await isGoogleAutoSyncActive(db, organizationId))) return "skipped";
+  // Taken before the read: an edit landing mid-sync keeps `updated_at` newer than this.
+  const attemptedAt = new Date().toISOString();
   const contact = await withTenant(db, organizationId, (tx) => findContactById(tx, contactId));
   if (contact?.organizationId !== organizationId || !isEligible(contact)) return "skipped";
 
@@ -108,7 +112,7 @@ export async function syncContactToGoogle(
     withTenant(db, organizationId, (tx) =>
       updateContactGoogleSync(tx, organizationId, contactId, {
         ...google,
-        lastAttemptAt: new Date().toISOString(),
+        lastAttemptAt: attemptedAt,
       }),
     );
 

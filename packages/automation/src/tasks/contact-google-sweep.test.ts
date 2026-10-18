@@ -4,6 +4,7 @@ const isGoogleAutoSyncActive = vi.hoisted(() => vi.fn());
 const listGoogleAutoSyncOrganizationIds = vi.hoisted(() => vi.fn());
 const listPendingGoogleSyncContactIds = vi.hoisted(() => vi.fn());
 const markGoogleSweepAt = vi.hoisted(() => vi.fn());
+const clearFailedGoogleSyncJobs = vi.hoisted(() => vi.fn());
 const enqueueContactGoogleSync = vi.hoisted(() =>
   vi.fn<(p: { organizationId: string; contactId: string }) => Promise<{ skipped: boolean }>>(),
 );
@@ -17,7 +18,7 @@ vi.mock("@crm/db", () => ({ getDb: () => ({}) }));
 vi.mock("@crm/observability", () => ({
   createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }),
 }));
-vi.mock("../enqueue", () => ({ enqueueContactGoogleSync }));
+vi.mock("../enqueue", () => ({ clearFailedGoogleSyncJobs, enqueueContactGoogleSync }));
 
 import { contactGoogleSweepHandler } from "./contact-google-sweep";
 
@@ -44,6 +45,14 @@ describe("contactGoogleSweepHandler", () => {
     ]);
     expect(markGoogleSweepAt).toHaveBeenCalledWith({}, A);
     expect(listGoogleAutoSyncOrganizationIds).not.toHaveBeenCalled();
+  });
+
+  it("drops failed jobs holding the org key before queueing", async () => {
+    await contactGoogleSweepHandler({ organizationId: A });
+    expect(clearFailedGoogleSyncJobs).toHaveBeenCalledWith(A);
+    expect(clearFailedGoogleSyncJobs.mock.invocationCallOrder[0]).toBeLessThan(
+      enqueueContactGoogleSync.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("skips an org without active auto-sync (no consent or needs_reauth)", async () => {

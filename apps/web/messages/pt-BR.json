@@ -531,7 +531,7 @@
       "lastSynced": "última sincronização em {date}",
       "lastSweep": "última varredura automática em {date}",
       "syncFailed": "{count, plural, one {# contato não foi enviado ao Google} other {# contatos não foram enviados ao Google}}. O Bosun tenta de novo automaticamente em cerca de 1 hora.",
-      "syncConfirm": "Enviar {count, plural, one {# contato} other {# contatos}} para a conta Google {account}? Contatos com o mesmo telefone ou e-mail serão atualizados em vez de duplicados.",
+      "syncConfirm": "Enviar {count, plural, one {# contato} other {# contatos}} para a conta Google {account}? Contatos com o mesmo telefone ou e-mail serão atualizados em vez de duplicados. A partir daqui, contatos novos e edições também serão enviados automaticamente; para parar, desconecte o Google.",
       "syncQueued": "Sincronização iniciada; o card atualiza conforme o envio avança",
       "disconnect": "Desconectar",
       "disconnectConfirm": "Desconectar o Google? O acesso do Bosun à conta será revogado; os contatos já enviados permanecem na conta Google.",
