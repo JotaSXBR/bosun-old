@@ -15,14 +15,14 @@ Plano: `tasks/plan.md`. Branch: `chore/lint-warnings`. Um commit por tarefa,
 
 ## Task 2: Pacotes pequenos
 
-- [ ] `config` (4), `db` (2), `ai` (1 se sobrar), `storage`, `auth` (15), `channels` (17)
+- [x] `config` (4), `db` (2), `ai` (1 se sobrar), `storage`, `auth` (15), `channels` (17)
 - **Acceptance**: `pnpm --filter @crm/{config,db,ai,storage,auth,channels} lint` sem warnings
 - **Verify**: lint + testes (e integração) de cada pacote tocado
 - **Deps**: 1 · **Tamanho**: M
 
 ## Task 3: `automation`
 
-- [ ] 22 warnings (`max-statements`, `max-lines-per-function`, `max-params`) nos handlers
+- [x] 22 warnings (`max-statements`, `max-lines-per-function`, `max-params`) nos handlers
 - **Acceptance**: `pnpm --filter @crm/automation lint` limpo; testes dos handlers inalterados
 - **Verify**: `pnpm --filter @crm/automation test` · integração dos jobs tocados
 - **Deps**: 1 · **Tamanho**: M
@@ -59,7 +59,7 @@ Plano: `tasks/plan.md`. Branch: `chore/lint-warnings`. Um commit por tarefa,
 
 ## Task 7: `design-system`
 
-- [ ] 38 warnings (componentes e showcase: `max-lines-per-function`, `max-params`, `no-empty-function`, testes de tokens)
+- [x] 38 warnings (componentes e showcase: `max-lines-per-function`, `max-params`, `no-empty-function`, testes de tokens)
 - **Acceptance**: `pnpm --filter @crm/design-system lint` limpo; `tokens.test.ts` inalterado em cobertura
 - **Verify**: lint · testes do design-system · typecheck do web (consome os componentes)
 - **Deps**: 1 · **Tamanho**: M
