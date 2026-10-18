@@ -33,8 +33,8 @@ Plano: `tasks/plan.md`. Branch: `chore/lint-warnings`. Um commit por tarefa,
 
 ## Task 4: `core` — `max-params`
 
-- [ ] 56 em src + 4 em testes: objeto de opções nas assinaturas; chamadores atualizados (web, automation, testes)
-- [ ] Fatiar por módulo (≈100 linhas/commit)
+- [x] 56 em src + 4 em testes: objeto de opções nas assinaturas; chamadores atualizados (web, automation, testes)
+- [x] Fatiar por módulo (≈100 linhas/commit)
 - **Acceptance**: 0 `max-params` em `@crm/core`; `pnpm typecheck` do monorepo verde
 - **Verify**: `pnpm typecheck` · `pnpm --filter @crm/core test` · integração dos módulos tocados
 - **Deps**: 3 · **Tamanho**: L (dividir em commits por módulo)
@@ -66,7 +66,7 @@ Plano: `tasks/plan.md`. Branch: `chore/lint-warnings`. Um commit por tarefa,
 
 ## Task 8: `web` — `max-statements`
 
-- [ ] ≈53 em actions, route handlers e componentes: extrair helpers nomeados
+- [x] ≈53 em actions, route handlers e componentes: extrair helpers nomeados
 - **Acceptance**: 0 `max-statements` em `@crm/web`
 - **Verify**: `pnpm --filter @crm/web test` · typecheck · e2e dos fluxos tocados (Playwright, só texto de pass/fail)
 - **Deps**: 4 · **Tamanho**: L (fatiar por área: actions, api, components)
