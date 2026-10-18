@@ -42,15 +42,17 @@ async function openConversation(
   for (let i = 1; i <= messageCount; i++) {
     await withTenant(db, org, (tx) =>
       ingestChannelEvent(tx, conn, {
-        type: "message.received",
-        externalMessageId: `draft_${chatId}_${i}`,
-        from: { channelUserId: chatId, displayName: "Cliente" },
-        content: {
-          type: "text",
-          text: messageCount > 1 ? `msg ${i}` : "qual o prazo de entrega?",
+        event: {
+          type: "message.received",
+          externalMessageId: `draft_${chatId}_${i}`,
+          from: { channelUserId: chatId, displayName: "Cliente" },
+          content: {
+            type: "text",
+            text: messageCount > 1 ? `msg ${i}` : "qual o prazo de entrega?",
+          },
+          // Distinct timestamps pin a deterministic transcript order.
+          timestamp: messageCount > 1 ? new Date(Date.UTC(2024, 0, 1, 0, 0, i)) : new Date(),
         },
-        // Distinct timestamps pin a deterministic transcript order.
-        timestamp: messageCount > 1 ? new Date(Date.UTC(2024, 0, 1, 0, 0, i)) : new Date(),
       }),
     );
   }

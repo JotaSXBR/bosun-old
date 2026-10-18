@@ -36,7 +36,11 @@ function assertAgentEditable(ctx: TenantContext, kind: string): void {
 }
 
 /** Audit is post-commit best-effort — a logging failure must not fail the mutation. */
-function audit(db: Database, ctx: TenantContext, action: string, agentId: string): void {
+function audit(
+  db: Database,
+  ctx: TenantContext,
+  { action, id: agentId }: { action: string; id: string },
+): void {
   recordAuditEvent(db, ctx, {
     action,
     targetType: "agent",
@@ -67,7 +71,7 @@ export async function createAgent(
       throw error;
     }
   });
-  audit(db, ctx, "agent.created", agent.id);
+  audit(db, ctx, { action: "agent.created", id: agent.id });
   return agent;
 }
 
@@ -94,7 +98,7 @@ export async function updateAgent(
     if (!updated) throw new NotFoundError("Agent", parsed.agentId);
     return updated;
   });
-  audit(db, ctx, "agent.updated", agent.id);
+  audit(db, ctx, { action: "agent.updated", id: agent.id });
   return agent;
 }
 
@@ -111,5 +115,5 @@ export async function deleteAgentById(
     assertAgentEditable(ctx, existing.kind);
     await deleteAgent(tx, existing.id);
   });
-  audit(db, ctx, "agent.deleted", agentId);
+  audit(db, ctx, { action: "agent.deleted", id: agentId });
 }

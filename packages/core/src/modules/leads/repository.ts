@@ -244,8 +244,7 @@ export async function findContactById(
 export async function searchContacts(
   executor: DbExecutor,
   organizationId: string,
-  query: string | undefined,
-  limit: number,
+  { query, limit }: { query: string | undefined; limit: number },
 ) {
   const pattern = `%${(query ?? "").replace(/[%_\\]/g, "")}%`;
   return executor

@@ -131,8 +131,7 @@ export async function updateContactAvatar(
 export async function updateContactGoogleSync(
   executor: DbExecutor,
   organizationId: string,
-  contactId: string,
-  google: Record<string, unknown>,
+  { contactId, google }: { contactId: string; google: Record<string, unknown> },
 ): Promise<void> {
   await executor
     .update(contacts)

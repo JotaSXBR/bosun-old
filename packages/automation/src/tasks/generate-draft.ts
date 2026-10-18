@@ -71,7 +71,7 @@ async function prepare(db: Database, payload: GenerateDraftPayload): Promise<Pre
 
   const [drafter, messages] = await Promise.all([
     findOrCreateDrafter(db, organizationId),
-    listRecentMessages(db, organizationId, conversationId, TRANSCRIPT_LIMIT),
+    listRecentMessages(db, organizationId, { conversationId, limit: TRANSCRIPT_LIMIT }),
   ]);
   return {
     credentials: base.credentials,

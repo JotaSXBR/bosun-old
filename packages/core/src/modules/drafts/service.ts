@@ -25,7 +25,11 @@ import type { DraftPayload, ReviewNudgeInput } from "./schemas";
 import { draftPayloadSchema, requestDraftInput, reviewNudgeInput } from "./schemas";
 
 /** Audit is post-commit best-effort — a logging failure must not fail the mutation. */
-function audit(db: Database, ctx: TenantContext, action: string, suggestionId: string): void {
+function audit(
+  db: Database,
+  ctx: TenantContext,
+  { action, id: suggestionId }: { action: string; id: string },
+): void {
   recordAuditEvent(db, ctx, {
     action,
     targetType: "agent_suggestion",
@@ -216,7 +220,7 @@ export async function reviewNudge(
     });
     return row;
   });
-  audit(db, ctx, `agent_nudge.${action}`, suggestionId);
+  audit(db, ctx, { action: `agent_nudge.${action}`, id: suggestionId });
   return reviewed;
 }
 
@@ -228,8 +232,7 @@ export async function reviewNudge(
 export async function approveDraft(
   db: Database,
   ctx: TenantContext,
-  suggestionId: string,
-  deps?: { provider?: ChannelProvider },
+  { suggestionId, deps }: { suggestionId: string; deps?: { provider?: ChannelProvider } },
 ): Promise<AgentSuggestionRow> {
   assertPermission(ctx, { messaging: ["write"] });
   const suggestion = assertDraftRow(
@@ -257,12 +260,10 @@ export async function approveDraft(
   try {
     // Sends outside the review tx — provider latency must not hold row
     // locks. `automated` → anti-ban envelope (the body is AI-generated).
-    await sendOutboundMessage(
-      db,
-      ctx,
-      { conversationId, text: body },
-      { ...deps, automated: true },
-    );
+    await sendOutboundMessage(db, ctx, {
+      input: { conversationId, text: body },
+      deps: { ...deps, automated: true },
+    });
   } catch (error) {
     // Release the claim so a failed send leaves the draft pending.
     await withTenant(db, ctx.organizationId, (tx) => releaseDraftClaim(tx, suggestionId)).catch(
@@ -280,7 +281,7 @@ export async function approveDraft(
       targetType: DRAFT_TARGET_TYPE,
     }),
   );
-  audit(db, ctx, "agent_draft.approved", suggestionId);
+  audit(db, ctx, { action: "agent_draft.approved", id: suggestionId });
   return claimed;
 }
 
@@ -313,7 +314,7 @@ export async function rejectDraft(
     });
     return row;
   });
-  audit(db, ctx, "agent_draft.rejected", suggestionId);
+  audit(db, ctx, { action: "agent_draft.rejected", id: suggestionId });
   return reviewed;
 }
 
@@ -324,14 +325,17 @@ export async function rejectDraft(
  */
 export async function findOrCreateDrafter(db: Database, organizationId: string) {
   return withTenant(db, organizationId, (tx) =>
-    findOrCreateAgentByKind(tx, organizationId, "drafter", {
-      name: "Drafter",
-      specialty: "Sugestões de resposta para revisão humana",
-      status: "active",
-      systemPrompt:
-        "Você escreve rascunhos de resposta no tom da empresa: cordial, direto, " +
-        "sem jargão técnico com o cliente. Trate o cliente por 'você'.",
-      toolsAllowlist: [],
+    findOrCreateAgentByKind(tx, organizationId, {
+      kind: "drafter",
+      defaults: {
+        name: "Drafter",
+        specialty: "Sugestões de resposta para revisão humana",
+        status: "active",
+        systemPrompt:
+          "Você escreve rascunhos de resposta no tom da empresa: cordial, direto, " +
+          "sem jargão técnico com o cliente. Trate o cliente por 'você'.",
+        toolsAllowlist: [],
+      },
     }),
   );
 }
@@ -343,12 +347,15 @@ export async function findOrCreateDrafter(db: Database, organizationId: string) 
  */
 export async function findOrCreateObserver(db: Database, organizationId: string) {
   return withTenant(db, organizationId, (tx) =>
-    findOrCreateAgentByKind(tx, organizationId, "observer", {
-      name: "Observer",
-      specialty: "Análise pós-atendimento e aprendizado operacional",
-      status: "active",
-      systemPrompt: "",
-      toolsAllowlist: [],
+    findOrCreateAgentByKind(tx, organizationId, {
+      kind: "observer",
+      defaults: {
+        name: "Observer",
+        specialty: "Análise pós-atendimento e aprendizado operacional",
+        status: "active",
+        systemPrompt: "",
+        toolsAllowlist: [],
+      },
     }),
   );
 }

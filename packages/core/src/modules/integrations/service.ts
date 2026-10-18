@@ -114,8 +114,7 @@ export type RefreshResult = {
 export async function requestConnectionPairingCode(
   db: Database,
   ctx: TenantContext,
-  id: string,
-  phoneNumber: string,
+  { id, phoneNumber }: { id: string; phoneNumber: string },
 ): Promise<{ code: string }> {
   assertPermission(ctx, { integrations: ["manage"] });
   const parsed = z
@@ -138,8 +137,7 @@ export async function requestConnectionPairingCode(
 export async function connectionLifecycle(
   db: Database,
   ctx: TenantContext,
-  id: string,
-  action: "stop" | "logout" | "restart",
+  { id, action }: { id: string; action: "stop" | "logout" | "restart" },
 ): Promise<RefreshResult> {
   assertPermission(ctx, { integrations: ["manage"] });
   const conn = await getConnectionOrThrow(db, ctx, id);
@@ -168,8 +166,7 @@ export async function connectionLifecycle(
 export async function updateWidgetConfig(
   db: Database,
   ctx: TenantContext,
-  id: string,
-  config: unknown,
+  { id, config }: { id: string; config: unknown },
 ): Promise<ChannelConnectionRow> {
   assertPermission(ctx, { integrations: ["manage"] });
   const conn = await getConnectionOrThrow(db, ctx, id);

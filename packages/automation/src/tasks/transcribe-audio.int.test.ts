@@ -41,11 +41,13 @@ async function ingestAudio(org: string, conn: ConnectionRef, chatId: string): Pr
   };
   const messageId = await withTenant(db, org, async (tx) => {
     const result = await ingestChannelEvent(tx, conn, {
-      type: "message.received",
-      externalMessageId: `stt_${chatId}`,
-      from: { channelUserId: chatId, displayName: "Cliente" },
-      content: mediaContent,
-      timestamp: new Date(),
+      event: {
+        type: "message.received",
+        externalMessageId: `stt_${chatId}`,
+        from: { channelUserId: chatId, displayName: "Cliente" },
+        content: mediaContent,
+        timestamp: new Date(),
+      },
     });
     return result.messageId;
   });
@@ -198,11 +200,13 @@ describe("transcribeAudioHandler", () => {
   it("skips non-audio messages", async () => {
     const messageId = await withTenant(db, orgB, async (tx) => {
       const result = await ingestChannelEvent(tx, connB, {
-        type: "message.received",
-        externalMessageId: "stt_text@c.us",
-        from: { channelUserId: "stt-text@c.us" },
-        content: { type: "text", text: "só texto" },
-        timestamp: new Date(),
+        event: {
+          type: "message.received",
+          externalMessageId: "stt_text@c.us",
+          from: { channelUserId: "stt-text@c.us" },
+          content: { type: "text", text: "só texto" },
+          timestamp: new Date(),
+        },
       });
       return result.messageId;
     });

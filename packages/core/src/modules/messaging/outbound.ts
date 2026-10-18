@@ -70,16 +70,16 @@ export async function sendWithEnvelope(
 export async function sendOutboundMessage(
   db: Database,
   ctx: TenantContext,
-  input: SendOutboundInput,
-  deps?: { provider?: ChannelProvider; automated?: boolean },
+  {
+    input,
+    deps,
+  }: { input: SendOutboundInput; deps?: { provider?: ChannelProvider; automated?: boolean } },
 ): Promise<MessageRow> {
   const parsed = sendOutboundInput.parse(input);
-  return sendChannelMessage(
-    db,
-    ctx,
-    { conversationId: parsed.conversationId, content: { type: "text", text: parsed.text } },
+  return sendChannelMessage(db, ctx, {
+    input: { conversationId: parsed.conversationId, content: { type: "text", text: parsed.text } },
     deps,
-  );
+  });
 }
 
 /**
@@ -91,8 +91,10 @@ export async function sendOutboundMessage(
 export async function sendChannelMessage(
   db: Database,
   ctx: TenantContext,
-  input: SendChannelInput,
-  deps?: { provider?: ChannelProvider; automated?: boolean },
+  {
+    input,
+    deps,
+  }: { input: SendChannelInput; deps?: { provider?: ChannelProvider; automated?: boolean } },
 ): Promise<MessageRow> {
   assertPermission(ctx, { messaging: ["write"] });
   const parsed = sendChannelInput.parse(input);
@@ -173,14 +175,20 @@ export async function sendChannelMessage(
       authorId: ctx.userId,
     });
     if (!message) throw new Error("outbound message insert raced");
-    await updateConversationLastMessage(tx, conversation.id, now, {
-      direction: "outbound",
-      preview: messagePreviewText(content),
+    await updateConversationLastMessage(tx, conversation.id, {
+      lastMessageAt: now,
+      lastMessage: {
+        direction: "outbound",
+        preview: messagePreviewText(content),
+      },
     });
-    await patchTicket(tx, ctx.organizationId, conversation.id, {
-      status: "waiting_customer",
-      assigneeId: current.assigneeId ?? ctx.userId,
-      firstResponseAt: current.firstResponseAt ?? now,
+    await patchTicket(tx, ctx.organizationId, {
+      conversationId: conversation.id,
+      patch: {
+        status: "waiting_customer",
+        assigneeId: current.assigneeId ?? ctx.userId,
+        firstResponseAt: current.firstResponseAt ?? now,
+      },
     });
     // Sending implies the author saw the thread — bump their read cursor.
     await upsertConversationRead(tx, {
@@ -209,8 +217,13 @@ export async function sendChannelMessage(
 export async function resendFailedMessage(
   db: Database,
   ctx: TenantContext,
-  input: MessageActionInput,
-  deps?: { provider?: ChannelProvider; signUrl?: (storageKey: string) => Promise<string> },
+  {
+    input,
+    deps,
+  }: {
+    input: MessageActionInput;
+    deps?: { provider?: ChannelProvider; signUrl?: (storageKey: string) => Promise<string> };
+  },
 ): Promise<MessageRow> {
   assertPermission(ctx, { messaging: ["write"] });
   const parsed = messageActionInput.parse(input);
@@ -267,14 +280,20 @@ export async function resendFailedMessage(
       sentAt: now,
     });
     if (!updated) throw new Error("resend status raced — message no longer failed");
-    await updateConversationLastMessage(tx, conversation.id, now, {
-      direction: "outbound",
-      preview: messagePreviewText(content),
+    await updateConversationLastMessage(tx, conversation.id, {
+      lastMessageAt: now,
+      lastMessage: {
+        direction: "outbound",
+        preview: messagePreviewText(content),
+      },
     });
-    await patchTicket(tx, ctx.organizationId, conversation.id, {
-      status: "waiting_customer",
-      assigneeId: current.assigneeId ?? ctx.userId,
-      firstResponseAt: current.firstResponseAt ?? now,
+    await patchTicket(tx, ctx.organizationId, {
+      conversationId: conversation.id,
+      patch: {
+        status: "waiting_customer",
+        assigneeId: current.assigneeId ?? ctx.userId,
+        firstResponseAt: current.firstResponseAt ?? now,
+      },
     });
     await upsertConversationRead(tx, {
       organizationId: ctx.organizationId,

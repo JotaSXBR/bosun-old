@@ -148,8 +148,10 @@ async function resolveWidgetSession(
 export async function sendWidgetMessage(
   db: Database,
   sessionToken: string,
-  input: { text: string; clientMessageId?: string | undefined },
-  deps?: IngestDeps,
+  {
+    input,
+    deps,
+  }: { input: { text: string; clientMessageId?: string | undefined }; deps?: IngestDeps },
 ): Promise<WebhookIngestResult> {
   const found = await resolveWidgetSession(db, sessionToken);
   if (!found) throw new NotFoundError("Widget session");
@@ -166,7 +168,7 @@ export async function sendWidgetMessage(
     headers: {},
     query: {},
   };
-  return ingestChannelWebhook(db, found.connection.webhookToken, request, deps);
+  return ingestChannelWebhook(db, found.connection.webhookToken, { request, deps });
 }
 
 /**

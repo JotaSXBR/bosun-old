@@ -100,25 +100,30 @@ describe("renderOffHoursMessage", () => {
     const now = new Date("2024-04-13T02:00:00Z"); // Fri 23:00 SP
     // Same-day window that hasn't started.
     const today = nextOpeningAt(weekdays, TZ, new Date("2024-04-08T10:00:00Z"))!;
-    expect(renderOffHoursMessage(tpl, today, new Date("2024-04-08T10:00:00Z"), TZ)).toContain(
-      "hoje às 09:00",
-    );
+    expect(
+      renderOffHoursMessage(tpl, {
+        next: today,
+        now: new Date("2024-04-08T10:00:00Z"),
+        timeZone: TZ,
+      }),
+    ).toContain("hoje às 09:00");
     const tomorrow = nextOpeningAt(weekdays, TZ, mon2300)!;
-    expect(renderOffHoursMessage(tpl, tomorrow, mon2300, TZ)).toContain("amanhã às 09:00");
-    // Friday night → Monday is "dia 15/04".
-    expect(renderOffHoursMessage(tpl, nextOpeningAt(weekdays, TZ, now), now, TZ)).toContain(
-      "dia 15/04 às 09:00",
+    expect(renderOffHoursMessage(tpl, { next: tomorrow, now: mon2300, timeZone: TZ })).toContain(
+      "amanhã às 09:00",
     );
-    expect(renderOffHoursMessage(tpl, null, now, TZ)).toContain("em breve");
+    // Friday night → Monday is "dia 15/04".
+    expect(
+      renderOffHoursMessage(tpl, { next: nextOpeningAt(weekdays, TZ, now), now, timeZone: TZ }),
+    ).toContain("dia 15/04 às 09:00");
+    expect(renderOffHoursMessage(tpl, { next: null, now, timeZone: TZ })).toContain("em breve");
   });
 
   it("replaces every placeholder occurrence", () => {
-    const both = renderOffHoursMessage(
-      "{proximo_atendimento} — repito: {proximo_atendimento}",
-      todayOf(weekdays),
-      new Date("2024-04-08T10:00:00Z"),
-      TZ,
-    );
+    const both = renderOffHoursMessage("{proximo_atendimento} — repito: {proximo_atendimento}", {
+      next: todayOf(weekdays),
+      now: new Date("2024-04-08T10:00:00Z"),
+      timeZone: TZ,
+    });
     expect(both).toBe("hoje às 09:00 — repito: hoje às 09:00");
   });
 });

@@ -282,8 +282,7 @@ function splitInput(
 export async function setPlatformSetting(
   db: Database,
   ctx: TenantContext,
-  group: PlatformSettingGroup,
-  input: Record<string, unknown>,
+  { group, input }: { group: PlatformSettingGroup; input: Record<string, unknown> },
 ): Promise<void> {
   if (!ctx.isPlatformAdmin) throw new AuthorizationError();
   const { values, cleared } = splitInput(group, input);
@@ -304,6 +303,6 @@ export async function setPlatformSetting(
   }
   const valueEncrypted = encryptJson(merged);
   await withPlatformScope(db, (tx) =>
-    upsertPlatformSettingRow(tx, group, valueEncrypted, ctx.userId),
+    upsertPlatformSettingRow(tx, group, { valueEncrypted, updatedByUserId: ctx.userId }),
   );
 }

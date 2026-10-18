@@ -91,8 +91,10 @@ export async function insertAgentOnce(
 export async function findOrCreateAgentByKind(
   executor: DbExecutor,
   organizationId: string,
-  kind: string,
-  defaults: Omit<InsertAgentValues, "organizationId" | "kind">,
+  {
+    kind,
+    defaults,
+  }: { kind: string; defaults: Omit<InsertAgentValues, "organizationId" | "kind"> },
 ): Promise<AgentRow> {
   const existing = await findAgentByKind(executor, organizationId, kind);
   if (existing) return existing;

@@ -69,8 +69,10 @@ export async function loadActiveTicket(
 export async function patchTicket(
   executor: DbExecutor,
   organizationId: string,
-  conversationId: string,
-  patch: Parameters<typeof updateConversationState>[2],
+  {
+    conversationId,
+    patch,
+  }: { conversationId: string; patch: Parameters<typeof updateConversationState>[2] },
 ): Promise<ConversationRow> {
   const conv = await updateConversationState(executor, conversationId, patch);
   if (!conv) throw new NotFoundError("Conversation", conversationId);
@@ -97,17 +99,19 @@ export async function patchTicket(
 export async function pickupConversation(
   db: Database,
   ctx: TenantContext,
-  input: ConversationIdInput,
-  deps?: { provider?: ChannelProvider },
+  { input, deps }: { input: ConversationIdInput; deps?: { provider?: ChannelProvider } },
 ): Promise<ConversationRow> {
   assertPermission(ctx, { messaging: ["write"] });
   const { conversationId } = conversationIdInput.parse(input);
   const ticket = await withTenant(db, ctx.organizationId, async (tx) => {
     const conv = await loadActiveTicket(tx, conversationId);
     assertTicketOwner(conv, ctx);
-    return patchTicket(tx, ctx.organizationId, conversationId, {
-      status: "in_progress",
-      assigneeId: ctx.userId,
+    return patchTicket(tx, ctx.organizationId, {
+      conversationId,
+      patch: {
+        status: "in_progress",
+        assigneeId: ctx.userId,
+      },
     });
   });
   try {
@@ -147,10 +151,13 @@ export async function transferConversation(
     } else if (toSector === null || !(await teamExists(tx, toSector))) {
       throw new NotFoundError("Team", toSector ?? undefined);
     }
-    const updated = await patchTicket(tx, ctx.organizationId, parsed.conversationId, {
-      status: toAssignee ? "in_progress" : "open",
-      assigneeId: toAssignee,
-      sectorId: toSector ?? conv.sectorId,
+    const updated = await patchTicket(tx, ctx.organizationId, {
+      conversationId: parsed.conversationId,
+      patch: {
+        status: toAssignee ? "in_progress" : "open",
+        assigneeId: toAssignee,
+        sectorId: toSector ?? conv.sectorId,
+      },
     });
     // Audited takeover, invisible to the customer: a private system note in
     // the ticket timeline records who moved it and to whom/where.
@@ -197,18 +204,20 @@ export type ResolveDeps = { enqueue?: ResolvedEnqueue };
 export async function resolveConversation(
   db: Database,
   ctx: TenantContext,
-  input: ConversationIdInput,
-  deps?: ResolveDeps,
+  { input, deps }: { input: ConversationIdInput; deps?: ResolveDeps },
 ): Promise<ConversationRow> {
   assertPermission(ctx, { messaging: ["write"] });
   const { conversationId } = conversationIdInput.parse(input);
   return withTenant(db, ctx.organizationId, async (tx) => {
     const conv = await loadActiveTicket(tx, conversationId);
     assertTicketOwner(conv, ctx);
-    const updated = await patchTicket(tx, ctx.organizationId, conversationId, {
-      status: "resolved",
-      resolvedAt: new Date(),
-      resolvedById: ctx.userId,
+    const updated = await patchTicket(tx, ctx.organizationId, {
+      conversationId,
+      patch: {
+        status: "resolved",
+        resolvedAt: new Date(),
+        resolvedById: ctx.userId,
+      },
     });
     await deps?.enqueue?.(tx, {
       organizationId: ctx.organizationId,
@@ -264,10 +273,13 @@ export async function reopenTicket(
       );
     }
     try {
-      return await patchTicket(tx, ctx.organizationId, conversationId, {
-        status: conv.assigneeId ? "in_progress" : "open",
-        resolvedAt: null,
-        resolvedById: null,
+      return await patchTicket(tx, ctx.organizationId, {
+        conversationId,
+        patch: {
+          status: conv.assigneeId ? "in_progress" : "open",
+          resolvedAt: null,
+          resolvedById: null,
+        },
       });
     } catch (error) {
       // A concurrent inbound may have committed a follow-up between the
@@ -303,8 +315,11 @@ export async function setConversationSnooze(
   return withTenant(db, ctx.organizationId, async (tx) => {
     const conv = await loadActiveTicket(tx, parsed.conversationId);
     assertTicketOwner(conv, ctx);
-    return patchTicket(tx, ctx.organizationId, parsed.conversationId, {
-      snoozedUntil: parsed.until,
+    return patchTicket(tx, ctx.organizationId, {
+      conversationId: parsed.conversationId,
+      patch: {
+        snoozedUntil: parsed.until,
+      },
     });
   });
 }
@@ -320,7 +335,10 @@ export async function setConversationWaiting(
   return withTenant(db, ctx.organizationId, async (tx) => {
     const conv = await loadActiveTicket(tx, conversationId);
     assertTicketOwner(conv, ctx);
-    return patchTicket(tx, ctx.organizationId, conversationId, { status: "waiting_customer" });
+    return patchTicket(tx, ctx.organizationId, {
+      conversationId,
+      patch: { status: "waiting_customer" },
+    });
   });
 }
 
@@ -335,7 +353,10 @@ export async function setConversationInProgress(
   return withTenant(db, ctx.organizationId, async (tx) => {
     const conv = await loadActiveTicket(tx, conversationId);
     assertTicketOwner(conv, ctx);
-    return patchTicket(tx, ctx.organizationId, conversationId, { status: "in_progress" });
+    return patchTicket(tx, ctx.organizationId, {
+      conversationId,
+      patch: { status: "in_progress" },
+    });
   });
 }
 

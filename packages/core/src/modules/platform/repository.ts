@@ -14,8 +14,7 @@ export async function listPlatformSettingRows(tx: Transaction): Promise<Platform
 export async function upsertPlatformSettingRow(
   tx: Transaction,
   key: string,
-  valueEncrypted: string,
-  updatedByUserId: string,
+  { valueEncrypted, updatedByUserId }: { valueEncrypted: string; updatedByUserId: string },
 ): Promise<void> {
   await tx
     .insert(platformSettings)

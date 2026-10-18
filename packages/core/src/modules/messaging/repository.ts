@@ -360,8 +360,10 @@ export function messagePreviewText(content: unknown): string {
 export async function updateConversationLastMessage(
   executor: DbExecutor,
   conversationId: string,
-  lastMessageAt: Date,
-  lastMessage: { direction: string; preview: string },
+  {
+    lastMessageAt,
+    lastMessage,
+  }: { lastMessageAt: Date; lastMessage: { direction: string; preview: string } },
 ): Promise<void> {
   await executor
     .update(conversations)

@@ -49,7 +49,7 @@ export async function createDeal(
       customAttributes: parsed.customAttributes ?? {},
     });
   });
-  audit(db, ctx, "deal.created", deal.id);
+  audit(db, ctx, { action: "deal.created", id: deal.id });
   return deal;
 }
 
@@ -99,7 +99,7 @@ export async function createDealFromConversation(
     }
     throw error;
   }
-  audit(db, ctx, "deal.created_from_conversation", deal.id);
+  audit(db, ctx, { action: "deal.created_from_conversation", id: deal.id });
   return deal;
 }
 
@@ -167,7 +167,7 @@ export async function deleteDeal(db: Database, ctx: TenantContext, dealId: strin
   await withTenant(db, ctx.organizationId, async (tx) => {
     if (!(await repo.deleteDeal(tx, dealId))) throw new NotFoundError("Deal", dealId);
   });
-  audit(db, ctx, "deal.deleted", dealId);
+  audit(db, ctx, { action: "deal.deleted", id: dealId });
 }
 
 /** Deal linked to a conversation, if any. Requires leads:read. */
@@ -183,9 +183,13 @@ export async function getDealForConversation(
 }
 
 /** Contact picker for "new deal". Requires leads:read. */
-export async function searchContacts(db: Database, ctx: TenantContext, query?: string, limit = 20) {
+export async function searchContacts(
+  db: Database,
+  ctx: TenantContext,
+  { query, limit = 20 }: { query?: string; limit?: number } = {},
+) {
   assertPermission(ctx, { leads: ["read"] });
   return withTenant(db, ctx.organizationId, (tx) =>
-    repo.searchContacts(tx, ctx.organizationId, query, limit),
+    repo.searchContacts(tx, ctx.organizationId, { query, limit }),
   );
 }

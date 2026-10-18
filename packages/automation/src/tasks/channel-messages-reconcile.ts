@@ -87,7 +87,7 @@ async function ingestMessages(ctx: BackfillContext, messages: ChatMessages): Pro
     // process-channel-event here would fire off-hours auto-replies for
     // messages received while the stack was down.
     const result = await withTenant(ctx.db, ctx.conn.organizationId, (tx) =>
-      ingestChannelEvent(tx, ctx.conn, { type: "message.received", ...message }),
+      ingestChannelEvent(tx, ctx.conn, { event: { type: "message.received", ...message } }),
     );
     if (result.messageId) ingested += 1;
   }

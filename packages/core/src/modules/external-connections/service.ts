@@ -51,8 +51,10 @@ function stateMatches(bundle: GoogleBundle, state: string): boolean {
 export async function saveGoogleClient(
   db: Database,
   ctx: TenantContext,
-  input: SaveGoogleClientInput,
-  oauth: GoogleOAuthClient = createGoogleOAuthClient(),
+  {
+    input,
+    oauth = createGoogleOAuthClient(),
+  }: { input: SaveGoogleClientInput; oauth?: GoogleOAuthClient },
 ): Promise<{ authUrl: string }> {
   assertPermission(ctx, { integrations: ["manage"] });
   const parsed = saveGoogleClientInput.parse(input);
@@ -87,8 +89,10 @@ export async function saveGoogleClient(
 export async function completeGoogleAuthorization(
   db: Database,
   ctx: TenantContext,
-  input: CompleteGoogleAuthorizationInput,
-  oauth: GoogleOAuthClient = createGoogleOAuthClient(),
+  {
+    input,
+    oauth = createGoogleOAuthClient(),
+  }: { input: CompleteGoogleAuthorizationInput; oauth?: GoogleOAuthClient },
 ): Promise<ExternalConnectionPublic> {
   assertPermission(ctx, { integrations: ["manage"] });
   const parsed = completeGoogleAuthorizationInput.parse(input);

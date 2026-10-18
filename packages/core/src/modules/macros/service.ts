@@ -49,7 +49,7 @@ export async function searchOrgMacros(
   const safePrefix = prefix.trim().slice(0, 60);
   return withTenant(db, ctx.organizationId, (tx) =>
     safePrefix
-      ? searchMacros(tx, ctx.organizationId, safePrefix)
+      ? searchMacros(tx, ctx.organizationId, { prefix: safePrefix })
       : listMacros(tx, ctx.organizationId),
   );
 }
@@ -78,8 +78,7 @@ export async function createMacro(
 export async function updateMacro(
   db: Database,
   ctx: TenantContext,
-  macroId: string,
-  input: UpdateMacroInput,
+  { macroId, input }: { macroId: string; input: UpdateMacroInput },
 ): Promise<MacroRow> {
   assertMacroWriter(ctx);
   const parsed = updateMacroInput.parse(input);
@@ -116,7 +115,11 @@ export async function deleteMacro(
 // --- Suggestion review (agent proposal → manager/admin/owner decision) -------
 
 /** Audit is post-commit best-effort — a logging failure must not fail the mutation. */
-function audit(db: Database, ctx: TenantContext, action: string, suggestionId: string): void {
+function audit(
+  db: Database,
+  ctx: TenantContext,
+  { action, id: suggestionId }: { action: string; id: string },
+): void {
   recordAuditEvent(db, ctx, {
     action,
     targetType: "agent_suggestion",
@@ -206,7 +209,7 @@ export async function approveMacroSuggestion(
       suggestionId,
     });
   });
-  audit(db, ctx, "agent_suggestion.approved", suggestionId);
+  audit(db, ctx, { action: "agent_suggestion.approved", id: suggestionId });
 }
 
 /** Requires ai:manage. Idempotent: re-rejecting is a no-op. */
@@ -235,5 +238,5 @@ export async function rejectMacroSuggestion(
       suggestionId,
     });
   });
-  audit(db, ctx, "agent_suggestion.rejected", suggestionId);
+  audit(db, ctx, { action: "agent_suggestion.rejected", id: suggestionId });
 }

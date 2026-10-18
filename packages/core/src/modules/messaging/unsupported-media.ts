@@ -105,8 +105,7 @@ async function reserveMarker(
 async function deliverReply(
   db: Database,
   plan: Extract<ReplyPlan, { ok: true }>,
-  marker: MessageRow,
-  deps?: { provider?: ChannelProvider },
+  { marker, deps }: { marker: MessageRow; deps?: { provider?: ChannelProvider } },
 ): Promise<UnsupportedMediaResult> {
   const provider =
     deps?.provider ??
@@ -136,9 +135,12 @@ async function deliverReply(
         updatedAt: new Date(),
       })
       .where(sql`${messages.id} = ${marker.id}`);
-    await updateConversationLastMessage(tx, plan.conv.id, plan.now, {
-      direction: "outbound",
-      preview: plan.text,
+    await updateConversationLastMessage(tx, plan.conv.id, {
+      lastMessageAt: plan.now,
+      lastMessage: {
+        direction: "outbound",
+        preview: plan.text,
+      },
     });
     await emitDomainEvent(tx, {
       type: "message.sent",
@@ -168,5 +170,5 @@ export async function maybeSendUnsupportedMediaReply(
     reserveMarker(tx, plan.conv, plan.text),
   );
   if (!marker) return { sent: false, reason: "already-sent" };
-  return deliverReply(db, plan, marker, deps);
+  return deliverReply(db, plan, { marker, deps });
 }

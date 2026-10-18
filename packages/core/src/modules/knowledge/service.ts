@@ -18,7 +18,11 @@ import type { CreateKnowledgeEntryInput, UpdateKnowledgeEntryInput } from "./sch
 import { createKnowledgeEntryInput, updateKnowledgeEntryInput } from "./schemas";
 
 /** Audit is post-commit best-effort — a logging failure must not fail the mutation. */
-function audit(db: Database, ctx: TenantContext, action: string, entryId: string): void {
+function audit(
+  db: Database,
+  ctx: TenantContext,
+  { action, id: entryId }: { action: string; id: string },
+): void {
   recordAuditEvent(db, ctx, {
     action,
     targetType: "knowledge_entry",
@@ -53,7 +57,7 @@ export async function createKnowledgeEntry(
       source: "manual",
     }),
   );
-  audit(db, ctx, "knowledge_entry.created", entry.id);
+  audit(db, ctx, { action: "knowledge_entry.created", id: entry.id });
   return entry;
 }
 
@@ -87,5 +91,5 @@ export async function deleteKnowledgeEntry(
     if (!existing) throw new NotFoundError("KnowledgeEntry", entryId);
     await deleteEntry(tx, existing.id);
   });
-  audit(db, ctx, "knowledge_entry.deleted", entryId);
+  audit(db, ctx, { action: "knowledge_entry.deleted", id: entryId });
 }

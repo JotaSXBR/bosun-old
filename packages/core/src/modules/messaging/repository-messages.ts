@@ -91,8 +91,7 @@ export async function markMessageSent(
 export async function updateMessageStatus(
   executor: DbExecutor,
   channelConnectionId: string,
-  externalId: string,
-  status: string,
+  { externalId, status }: { externalId: string; status: string },
 ): Promise<MessageRow | undefined> {
   const [row] = await executor
     .update(messages)

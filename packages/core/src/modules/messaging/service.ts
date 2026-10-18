@@ -150,8 +150,10 @@ const AVATAR_HEAL_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 async function ingestMessageReceived(
   executor: DbExecutor,
   conn: ConnectionRef,
-  event: Extract<ChannelEvent, { type: "message.received" }>,
-  deps?: IngestDeps,
+  {
+    event,
+    deps,
+  }: { event: Extract<ChannelEvent, { type: "message.received" }>; deps?: IngestDeps },
 ): Promise<IngestedEvent> {
   const contact = await upsertContact(executor, conn.organizationId, {
     channelUserId: event.from.channelUserId,
@@ -195,9 +197,12 @@ async function ingestMessageReceived(
       ? { metadata: { unsupportedMedia: true } }
       : {}),
   });
-  await updateConversationLastMessage(executor, conversation.id, event.timestamp, {
-    direction: "inbound",
-    preview: messagePreviewText(event.content),
+  await updateConversationLastMessage(executor, conversation.id, {
+    lastMessageAt: event.timestamp,
+    lastMessage: {
+      direction: "inbound",
+      preview: messagePreviewText(event.content),
+    },
   });
   // Fan out only for a real insert — webhook replays return no row and must
   // not re-notify nor re-run the status transition. pg_notify fires on
@@ -367,15 +372,12 @@ async function ingestContactPresence(
 async function ingestMessageStatus(
   executor: DbExecutor,
   conn: ConnectionRef,
-  event: Extract<ChannelEvent, { type: "message.status" }>,
-  deps?: IngestDeps,
+  { event, deps }: { event: Extract<ChannelEvent, { type: "message.status" }>; deps?: IngestDeps },
 ): Promise<IngestedEvent> {
-  const message = await updateMessageStatus(
-    executor,
-    conn.id,
-    event.externalMessageId,
-    event.status,
-  );
+  const message = await updateMessageStatus(executor, conn.id, {
+    externalId: event.externalMessageId,
+    status: event.status,
+  });
   await deps?.enqueue?.(executor, {
     organizationId: conn.organizationId,
     channelConnectionId: conn.id,
@@ -388,8 +390,10 @@ async function ingestMessageStatus(
 async function ingestConnectionStatus(
   executor: DbExecutor,
   conn: ConnectionRef,
-  event: Extract<ChannelEvent, { type: "connection.status" }>,
-  deps?: IngestDeps,
+  {
+    event,
+    deps,
+  }: { event: Extract<ChannelEvent, { type: "connection.status" }>; deps?: IngestDeps },
 ): Promise<IngestedEvent> {
   await applyConnectionStatus(executor, conn.id, event.status);
   await deps?.enqueue?.(executor, {
@@ -403,16 +407,15 @@ async function ingestConnectionStatus(
 export async function ingestChannelEvent(
   executor: DbExecutor,
   conn: ConnectionRef,
-  event: ChannelEvent,
-  deps?: IngestDeps,
+  { event, deps }: { event: ChannelEvent; deps?: IngestDeps },
 ): Promise<IngestedEvent> {
   switch (event.type) {
     case "message.received":
-      return ingestMessageReceived(executor, conn, event, deps);
+      return ingestMessageReceived(executor, conn, { event, deps });
     case "message.status":
-      return ingestMessageStatus(executor, conn, event, deps);
+      return ingestMessageStatus(executor, conn, { event, deps });
     case "connection.status":
-      return ingestConnectionStatus(executor, conn, event, deps);
+      return ingestConnectionStatus(executor, conn, { event, deps });
     // Reactions/edits/revokes update an existing message — never enqueued
     // (they are not inbound messages; nothing to auto-reply to). Presence is
     // transient — notify-only, no enqueue.
@@ -436,8 +439,7 @@ export async function ingestChannelEvent(
 export async function ingestChannelWebhook(
   db: Database,
   webhookToken: string,
-  request: RawWebhookRequest,
-  deps?: IngestDeps,
+  { request, deps }: { request: RawWebhookRequest; deps?: IngestDeps },
 ): Promise<WebhookIngestResult> {
   const resolved = await resolveWebhookConnection(db, webhookToken);
   if (!resolved) throw new NotFoundError("Channel connection");
@@ -449,7 +451,7 @@ export async function ingestChannelWebhook(
   for (const event of provider.parseWebhook(request)) {
     processed.push(
       await withTenant(db, connection.organizationId, (tx) =>
-        ingestChannelEvent(tx, connection, event, deps),
+        ingestChannelEvent(tx, connection, { event, deps }),
       ),
     );
   }
@@ -487,12 +489,10 @@ export async function listContactTickets(
 ): Promise<ContactTicketRow[]> {
   assertPermission(ctx, { messaging: ["read"] });
   const parsed = contactTicketsInput.parse(input);
-  return repoListContactTickets(
-    db,
-    ctx.organizationId,
-    parsed.contactId,
-    parsed.excludeConversationId,
-  );
+  return repoListContactTickets(db, ctx.organizationId, {
+    contactId: parsed.contactId,
+    excludeConversationId: parsed.excludeConversationId,
+  });
 }
 
 /** Per-tab counters for the inbox workbench. Requires messaging:read. */
@@ -532,7 +532,10 @@ export async function listConversationMessages(
 ): Promise<MessageWithAuthorRow[]> {
   assertPermission(ctx, { messaging: ["read"] });
   const parsed = listMessagesInput.parse(input);
-  const rows = await listMessages(db, ctx.organizationId, parsed.conversationId, parsed.limit);
+  const rows = await listMessages(db, ctx.organizationId, {
+    conversationId: parsed.conversationId,
+    limit: parsed.limit,
+  });
   if (canInspectMessageHistory(ctx)) return rows;
   // Revoked content is kept for audit but redacted for non-privileged roles.
   return rows.map(redactRevoked);
@@ -557,7 +560,10 @@ export async function searchConversationMessages(
 ): Promise<MessageSearchHit[]> {
   assertPermission(ctx, { messaging: ["read"] });
   const parsed = searchMessagesInput.parse(input);
-  return searchMessages(db, ctx.organizationId, parsed.conversationId, parsed.query);
+  return searchMessages(db, ctx.organizationId, {
+    conversationId: parsed.conversationId,
+    query: parsed.query,
+  });
 }
 
 /**
@@ -571,13 +577,11 @@ export async function listConversationMessagesAround(
 ): Promise<MessageWithAuthorRow[]> {
   assertPermission(ctx, { messaging: ["read"] });
   const parsed = messagesAroundInput.parse(input);
-  const rows = await listMessagesAround(
-    db,
-    ctx.organizationId,
-    parsed.conversationId,
-    parsed.messageId,
-    parsed.radius,
-  );
+  const rows = await listMessagesAround(db, ctx.organizationId, {
+    conversationId: parsed.conversationId,
+    messageId: parsed.messageId,
+    radius: parsed.radius,
+  });
   if (!rows) throw new NotFoundError("Message", parsed.messageId);
   if (canInspectMessageHistory(ctx)) return rows;
   return rows.map(redactRevoked);
@@ -599,8 +603,7 @@ export async function listConversationMessagesAround(
 export async function markConversationRead(
   db: Database,
   ctx: TenantContext,
-  input: ConversationIdInput,
-  deps?: { provider?: ChannelProvider },
+  { input, deps }: { input: ConversationIdInput; deps?: { provider?: ChannelProvider } },
 ): Promise<void> {
   assertPermission(ctx, { messaging: ["read"] });
   const parsed = conversationIdInput.parse(input);

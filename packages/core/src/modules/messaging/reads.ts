@@ -192,9 +192,11 @@ export type ContactTicketRow = {
 export async function listContactTickets(
   db: Database,
   organizationId: string,
-  contactId: string,
-  excludeConversationId: string,
-  limit = 10,
+  {
+    contactId,
+    excludeConversationId,
+    limit = 10,
+  }: { contactId: string; excludeConversationId: string; limit?: number },
 ): Promise<ContactTicketRow[]> {
   return withTenant(db, organizationId, (tx) =>
     tx
@@ -328,8 +330,7 @@ const MESSAGE_SORT_KEY = sql`coalesce(${messages.sentAt}, '-infinity'::timestamp
 export async function listMessages(
   db: Database,
   organizationId: string,
-  conversationId: string,
-  limit: number,
+  { conversationId, limit }: { conversationId: string; limit: number },
 ): Promise<MessageWithAuthorRow[]> {
   return withTenant(db, organizationId, async (tx) => {
     // The `limit` NEWEST messages in chronological order — same tail
@@ -368,9 +369,7 @@ export type MessageSearchHit = {
 export async function searchConversationMessages(
   db: Database,
   organizationId: string,
-  conversationId: string,
-  query: string,
-  limit = 20,
+  { conversationId, query, limit = 20 }: { conversationId: string; query: string; limit?: number },
 ): Promise<MessageSearchHit[]> {
   const escaped = query.replace(/[\\%_]/g, (c) => `\\${c}`);
   const pattern = `%${escaped}%`;
@@ -405,9 +404,11 @@ export async function searchConversationMessages(
 export async function listMessagesAround(
   db: Database,
   organizationId: string,
-  conversationId: string,
-  messageId: string,
-  radius = 20,
+  {
+    conversationId,
+    messageId,
+    radius = 20,
+  }: { conversationId: string; messageId: string; radius?: number },
 ): Promise<MessageWithAuthorRow[] | null> {
   return withTenant(db, organizationId, async (tx) => {
     const [target] = await tx
@@ -479,8 +480,7 @@ export async function listMessagesAround(
 export async function listRecentMessages(
   db: Database,
   organizationId: string,
-  conversationId: string,
-  limit: number,
+  { conversationId, limit }: { conversationId: string; limit: number },
 ): Promise<MessageRow[]> {
   return withTenant(db, organizationId, async (tx) => {
     const rows = await tx

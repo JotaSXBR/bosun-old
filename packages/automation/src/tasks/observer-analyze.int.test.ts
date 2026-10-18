@@ -30,11 +30,13 @@ function ctx(organizationId: string, role: TenantContext["role"]): TenantContext
 async function resolvedConversation(org: string, conn: ConnectionRef, chatId: string) {
   await withTenant(db, org, (tx) =>
     ingestChannelEvent(tx, conn, {
-      type: "message.received",
-      externalMessageId: `obs_${chatId}_1`,
-      from: { channelUserId: chatId, displayName: "Cliente" },
-      content: { type: "text", text: "qual o prazo de entrega?" },
-      timestamp: new Date(),
+      event: {
+        type: "message.received",
+        externalMessageId: `obs_${chatId}_1`,
+        from: { channelUserId: chatId, displayName: "Cliente" },
+        content: { type: "text", text: "qual o prazo de entrega?" },
+        timestamp: new Date(),
+      },
     }),
   );
   const ticket = await withTenant(db, org, async (tx) => {
@@ -46,7 +48,7 @@ async function resolvedConversation(org: string, conn: ConnectionRef, chatId: st
       .limit(1);
     return conv!;
   });
-  await resolveConversation(db, ctx(org, "admin"), { conversationId: ticket.id });
+  await resolveConversation(db, ctx(org, "admin"), { input: { conversationId: ticket.id } });
   return ticket.id;
 }
 

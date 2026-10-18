@@ -216,7 +216,7 @@ export async function observerAnalyzeHandler(
 
   const [observer, messages] = await Promise.all([
     findOrCreateObserver(db, organizationId),
-    listRecentMessages(db, organizationId, conversationId, TRANSCRIPT_LIMIT),
+    listRecentMessages(db, organizationId, { conversationId, limit: TRANSCRIPT_LIMIT }),
   ]);
   return analyzeWithFallback({
     db,

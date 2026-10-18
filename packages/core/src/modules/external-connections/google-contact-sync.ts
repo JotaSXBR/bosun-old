@@ -62,10 +62,17 @@ const rejectsCredentials = (error: unknown): error is GooglePeopleError =>
 /** Creates, or updates with the etag; on a conflict rereads once and retries. */
 async function push(
   people: GooglePeopleClient,
-  accessToken: string,
-  person: GooglePersonInput,
-  current: GooglePerson | null,
-  ours: boolean,
+  {
+    accessToken,
+    person,
+    current,
+    ours,
+  }: {
+    accessToken: string;
+    person: GooglePersonInput;
+    current: GooglePerson | null;
+    ours: boolean;
+  },
 ): Promise<GooglePerson> {
   if (!current) return people.createContact({ accessToken, person });
   // A contact we already mirror gets the full mask, so a field emptied in
@@ -110,9 +117,12 @@ export async function syncContactToGoogle(
   // `lastAttemptAt` lets the sweep tell "checked, nothing to send" from "never tried".
   const save = (google: Record<string, unknown>) =>
     withTenant(db, organizationId, (tx) =>
-      updateContactGoogleSync(tx, organizationId, contactId, {
-        ...google,
-        lastAttemptAt: attemptedAt,
+      updateContactGoogleSync(tx, organizationId, {
+        contactId,
+        google: {
+          ...google,
+          lastAttemptAt: attemptedAt,
+        },
       }),
     );
 
@@ -133,7 +143,7 @@ export async function syncContactToGoogle(
       : null;
     const current = known ?? (await findCandidate(people, accessToken, person));
 
-    const saved = await push(people, accessToken, person, current, known !== null);
+    const saved = await push(people, { accessToken, person, current, ours: known !== null });
     await save({
       resourceName: saved.resourceName,
       etag: saved.source?.etag ?? null,

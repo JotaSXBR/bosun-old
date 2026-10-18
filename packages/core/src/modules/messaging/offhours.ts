@@ -154,9 +154,7 @@ export function nextOpeningAt(hours: BusinessHours, timeZone: string, now: Date)
  */
 export function renderOffHoursMessage(
   template: string,
-  next: Date | null,
-  now: Date,
-  timeZone: string,
+  { next, now, timeZone }: { next: Date | null; now: Date; timeZone: string },
 ): string {
   let label = "em breve";
   if (next) {
@@ -187,8 +185,7 @@ const SYSTEM_MARKER = "off_hours";
 async function reserveMarker(
   executor: DbExecutor,
   conv: ConversationRow,
-  dayKey: string,
-  text: string,
+  { dayKey, text }: { dayKey: string; text: string },
 ): Promise<MessageRow | undefined> {
   const [existing] = await executor
     .select()
@@ -268,7 +265,11 @@ async function planReply(
     return { ok: false, reason: "within-hours" };
   }
   const dayKey = localDayKey(now, timeZone);
-  const text = renderOffHoursMessage(template, nextOpeningAt(hours, timeZone, now), now, timeZone);
+  const text = renderOffHoursMessage(template, {
+    next: nextOpeningAt(hours, timeZone, now),
+    now,
+    timeZone,
+  });
   return { ok: true, organizationId: opts.organizationId, conv, text, dayKey, now };
 }
 
@@ -276,8 +277,7 @@ async function planReply(
 async function deliverReply(
   db: Database,
   plan: Extract<ReplyPlan, { ok: true }>,
-  marker: MessageRow,
-  deps?: { provider?: ChannelProvider },
+  { marker, deps }: { marker: MessageRow; deps?: { provider?: ChannelProvider } },
 ): Promise<OffHoursResult> {
   const provider =
     deps?.provider ??
@@ -307,9 +307,12 @@ async function deliverReply(
         updatedAt: new Date(),
       })
       .where(sql`${messages.id} = ${marker.id}`);
-    await updateConversationLastMessage(tx, plan.conv.id, plan.now, {
-      direction: "outbound",
-      preview: plan.text,
+    await updateConversationLastMessage(tx, plan.conv.id, {
+      lastMessageAt: plan.now,
+      lastMessage: {
+        direction: "outbound",
+        preview: plan.text,
+      },
     });
     await emitDomainEvent(tx, {
       type: "message.sent",
@@ -331,8 +334,8 @@ export async function maybeSendOffHoursReply(
   const plan = await planReply(db, opts);
   if (!plan.ok) return { sent: false, reason: plan.reason };
   const marker = await withTenant(db, opts.organizationId, (tx) =>
-    reserveMarker(tx, plan.conv, plan.dayKey, plan.text),
+    reserveMarker(tx, plan.conv, { dayKey: plan.dayKey, text: plan.text }),
   );
   if (!marker) return { sent: false, reason: "already-sent-today" };
-  return deliverReply(db, plan, marker, deps);
+  return deliverReply(db, plan, { marker, deps });
 }

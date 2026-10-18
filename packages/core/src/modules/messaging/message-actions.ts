@@ -42,8 +42,7 @@ type ProviderDeps = { provider?: ChannelProvider };
 async function resolveProvider(
   db: Database,
   ctx: TenantContext,
-  channelConnectionId: string,
-  deps?: ProviderDeps,
+  { channelConnectionId, deps }: { channelConnectionId: string; deps?: ProviderDeps },
 ): Promise<ChannelProvider> {
   return (
     deps?.provider ?? (await providerForConnection(db, ctx.organizationId, channelConnectionId))
@@ -53,8 +52,7 @@ async function resolveProvider(
 async function loadOwnedMessage(
   db: Database,
   ctx: TenantContext,
-  conversationId: string,
-  messageId: string,
+  { conversationId, messageId }: { conversationId: string; messageId: string },
 ): Promise<{ message: MessageRow; chatId: string }> {
   return withTenant(db, ctx.organizationId, async (tx) => {
     const conversation = await loadActiveTicket(tx, conversationId);
@@ -74,16 +72,21 @@ async function loadOwnedMessage(
 export async function reactToMessage(
   db: Database,
   ctx: TenantContext,
-  input: ReactMessageInput,
-  deps?: ProviderDeps,
+  { input, deps }: { input: ReactMessageInput; deps?: ProviderDeps },
 ): Promise<void> {
   assertPermission(ctx, { messaging: ["write"] });
   const parsed = reactMessageInput.parse(input);
-  const { message } = await loadOwnedMessage(db, ctx, parsed.conversationId, parsed.messageId);
+  const { message } = await loadOwnedMessage(db, ctx, {
+    conversationId: parsed.conversationId,
+    messageId: parsed.messageId,
+  });
   if (!message.externalId) {
     throw new DomainError("MESSAGE_NOT_CHANNEL", "Only channel messages accept reactions");
   }
-  const provider = await resolveProvider(db, ctx, message.channelConnectionId, deps);
+  const provider = await resolveProvider(db, ctx, {
+    channelConnectionId: message.channelConnectionId,
+    deps,
+  });
   if (!provider.sendReaction) {
     throw new DomainError("CHANNEL_UNSUPPORTED_ACTION", "Provider does not support reactions");
   }
@@ -116,22 +119,22 @@ export async function reactToMessage(
 export async function editMessageContent(
   db: Database,
   ctx: TenantContext,
-  input: EditMessageInput,
-  deps?: ProviderDeps,
+  { input, deps }: { input: EditMessageInput; deps?: ProviderDeps },
 ): Promise<void> {
   assertPermission(ctx, { messaging: ["write"] });
   const parsed = editMessageInput.parse(input);
-  const { message, chatId } = await loadOwnedMessage(
-    db,
-    ctx,
-    parsed.conversationId,
-    parsed.messageId,
-  );
+  const { message, chatId } = await loadOwnedMessage(db, ctx, {
+    conversationId: parsed.conversationId,
+    messageId: parsed.messageId,
+  });
   assertEditableMessage(message);
   if (message.sentAt && Date.now() - message.sentAt.getTime() > MESSAGE_EDIT_WINDOW_MS) {
     throw new DomainError("EDIT_WINDOW_EXPIRED", "Messages can only be edited ~15min after send");
   }
-  const provider = await resolveProvider(db, ctx, message.channelConnectionId, deps);
+  const provider = await resolveProvider(db, ctx, {
+    channelConnectionId: message.channelConnectionId,
+    deps,
+  });
   if (!provider.editMessage) {
     throw new DomainError("CHANNEL_UNSUPPORTED_ACTION", "Provider does not support edits");
   }
@@ -176,19 +179,19 @@ function assertEditableMessage(message: MessageRow): void {
 export async function deleteMessageContent(
   db: Database,
   ctx: TenantContext,
-  input: MessageActionInput,
-  deps?: ProviderDeps,
+  { input, deps }: { input: MessageActionInput; deps?: ProviderDeps },
 ): Promise<void> {
   assertPermission(ctx, { messaging: ["write"] });
   const parsed = messageActionInput.parse(input);
-  const { message, chatId } = await loadOwnedMessage(
-    db,
-    ctx,
-    parsed.conversationId,
-    parsed.messageId,
-  );
+  const { message, chatId } = await loadOwnedMessage(db, ctx, {
+    conversationId: parsed.conversationId,
+    messageId: parsed.messageId,
+  });
   assertEditableMessage(message);
-  const provider = await resolveProvider(db, ctx, message.channelConnectionId, deps);
+  const provider = await resolveProvider(db, ctx, {
+    channelConnectionId: message.channelConnectionId,
+    deps,
+  });
   if (!provider.deleteMessage) {
     throw new DomainError("CHANNEL_UNSUPPORTED_ACTION", "Provider does not support deletes");
   }
@@ -212,8 +215,7 @@ export async function deleteMessageContent(
 export async function sendChatPresence(
   db: Database,
   ctx: TenantContext,
-  input: PresenceInput,
-  deps?: ProviderDeps,
+  { input, deps }: { input: PresenceInput; deps?: ProviderDeps },
 ): Promise<void> {
   assertPermission(ctx, { messaging: ["write"] });
   const parsed = presenceInput.parse(input);
@@ -221,7 +223,10 @@ export async function sendChatPresence(
     loadActiveTicket(tx, parsed.conversationId),
   );
   assertTicketOwner(conversation, ctx);
-  const provider = await resolveProvider(db, ctx, conversation.channelConnectionId, deps);
+  const provider = await resolveProvider(db, ctx, {
+    channelConnectionId: conversation.channelConnectionId,
+    deps,
+  });
   await provider.sendPresence?.(conversation.externalId, parsed.presence);
 }
 
@@ -232,14 +237,16 @@ export async function sendChatPresence(
 export async function subscribeChatPresence(
   db: Database,
   ctx: TenantContext,
-  input: ConversationIdInput,
-  deps?: ProviderDeps,
+  { input, deps }: { input: ConversationIdInput; deps?: ProviderDeps },
 ): Promise<void> {
   assertPermission(ctx, { messaging: ["read"] });
   const parsed = conversationIdInput.parse(input);
   const conversation = await withTenant(db, ctx.organizationId, (tx) =>
     loadActiveTicket(tx, parsed.conversationId),
   );
-  const provider = await resolveProvider(db, ctx, conversation.channelConnectionId, deps);
+  const provider = await resolveProvider(db, ctx, {
+    channelConnectionId: conversation.channelConnectionId,
+    deps,
+  });
   await provider.subscribePresence?.(conversation.externalId);
 }

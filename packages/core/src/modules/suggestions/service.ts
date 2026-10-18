@@ -37,7 +37,11 @@ import type { CreateSuggestionInput, ListSuggestionsInput } from "./schemas";
 import { createSuggestionInput, listSuggestionsInput, suggestionTargetSchema } from "./schemas";
 
 /** Audit is post-commit best-effort — a logging failure must not fail the mutation. */
-function audit(db: Database, ctx: TenantContext, action: string, suggestionId: string): void {
+function audit(
+  db: Database,
+  ctx: TenantContext,
+  { action, id: suggestionId }: { action: string; id: string },
+): void {
   recordAuditEvent(db, ctx, {
     action,
     targetType: "agent_suggestion",
@@ -273,8 +277,7 @@ export async function createSystemSuggestions(
 async function applyAgentPayload(
   executor: DbExecutor,
   organizationId: string,
-  targetId: string | null,
-  payload: unknown,
+  { targetId, payload }: { targetId: string | null; payload: unknown },
 ): Promise<void> {
   if (targetId) {
     const existing = await findAgentById(executor, organizationId, targetId);
@@ -288,8 +291,7 @@ async function applyAgentPayload(
 async function applyKnowledgePayload(
   executor: DbExecutor,
   organizationId: string,
-  targetId: string | null,
-  payload: unknown,
+  { targetId, payload }: { targetId: string | null; payload: unknown },
 ): Promise<void> {
   if (targetId) {
     const existing = await findEntryById(executor, organizationId, targetId);
@@ -364,14 +366,15 @@ async function applyPayload(
   const targetId = suggestion.targetId ?? null;
   try {
     if (suggestion.targetType === "agent") {
-      await applyAgentPayload(executor, suggestion.organizationId, targetId, suggestion.payload);
-    } else if (suggestion.targetType === "knowledge_entry") {
-      await applyKnowledgePayload(
-        executor,
-        suggestion.organizationId,
+      await applyAgentPayload(executor, suggestion.organizationId, {
         targetId,
-        suggestion.payload,
-      );
+        payload: suggestion.payload,
+      });
+    } else if (suggestion.targetType === "knowledge_entry") {
+      await applyKnowledgePayload(executor, suggestion.organizationId, {
+        targetId,
+        payload: suggestion.payload,
+      });
     } else if (suggestion.targetType === "memory") {
       await applyMemoryPayload(executor, suggestion, reviewerId);
     } else {
@@ -441,7 +444,7 @@ export async function approveSuggestion(
     });
     return row;
   });
-  audit(db, ctx, "agent_suggestion.approved", suggestionId);
+  audit(db, ctx, { action: "agent_suggestion.approved", id: suggestionId });
   return reviewed;
 }
 
@@ -472,6 +475,6 @@ export async function rejectSuggestion(
     });
     return row;
   });
-  audit(db, ctx, "agent_suggestion.rejected", suggestionId);
+  audit(db, ctx, { action: "agent_suggestion.rejected", id: suggestionId });
   return reviewed;
 }

@@ -167,8 +167,7 @@ export type MediaResolverDeps = {
 export async function resolveMessageMedia(
   db: Database,
   ctx: TenantContext,
-  input: { messageId: string },
-  deps: MediaResolverDeps,
+  { input, deps }: { input: { messageId: string }; deps: MediaResolverDeps },
 ): Promise<ResolvedMediaBody | null> {
   const { content, channelConnectionId, externalId, conversationExternalId } =
     await getMessageMedia(db, ctx, input);
