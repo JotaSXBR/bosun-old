@@ -25,27 +25,9 @@ const MODULES = [
   { id: "config", label: "Configurações", icon: "settings" as const },
 ];
 
-function ButtonSection() {
+function ButtonStates() {
   return (
-    <Section title="Button">
-      <Row>
-        <Button variant="primary">Nova conversa</Button>
-        <Button>Salvar alterações</Button>
-        <Button variant="outline">Ver detalhes</Button>
-        <Button variant="ghost">Cancelar</Button>
-        <Button variant="inverse">Exportar</Button>
-        <Button variant="danger">Excluir fluxo</Button>
-      </Row>
-      <Row>
-        <Button size="sm" iconLeft="plus">
-          Compacto
-        </Button>
-        <Button size="lg" variant="primary" iconRight="arrow-right">
-          Começar agora
-        </Button>
-        <Button loading>Enviando</Button>
-        <Button disabled>Indisponível</Button>
-      </Row>
+    <>
       <Row>
         <Labeled label="default">
           <Button>Estados</Button>
@@ -83,6 +65,32 @@ function ButtonSection() {
           </Button>
         </Labeled>
       </Row>
+    </>
+  );
+}
+
+function ButtonSection() {
+  return (
+    <Section title="Button">
+      <Row>
+        <Button variant="primary">Nova conversa</Button>
+        <Button>Salvar alterações</Button>
+        <Button variant="outline">Ver detalhes</Button>
+        <Button variant="ghost">Cancelar</Button>
+        <Button variant="inverse">Exportar</Button>
+        <Button variant="danger">Excluir fluxo</Button>
+      </Row>
+      <Row>
+        <Button size="sm" iconLeft="plus">
+          Compacto
+        </Button>
+        <Button size="lg" variant="primary" iconRight="arrow-right">
+          Começar agora
+        </Button>
+        <Button loading>Enviando</Button>
+        <Button disabled>Indisponível</Button>
+      </Row>
+      <ButtonStates />
     </Section>
   );
 }
@@ -152,83 +160,107 @@ function BadgeTagSection() {
   );
 }
 
-function FormulariosSection() {
+function InputsDemo() {
+  return (
+    <>
+      <Input label="Buscar" icon="search" placeholder="Buscar conversas, contatos…" />
+      <Input
+        label="E-mail"
+        shape="rounded"
+        placeholder="voce@empresa.com"
+        hint="Usado para notificações da conta."
+      />
+      <Input
+        label="E-mail"
+        shape="rounded"
+        error="Formato de e-mail inválido."
+        defaultValue="nao-e-email"
+      />
+      <Row>
+        <Input size="sm" placeholder="Compacto" className="flex-1" />
+        <Input size="lg" icon="search" placeholder="Grande" className="flex-1" />
+        <Input placeholder="Desativado" disabled className="flex-1" />
+      </Row>
+      <Textarea placeholder="Escreva uma resposta…" aria-label="Resposta" />
+    </>
+  );
+}
+
+function SelectsDemo() {
   const [selectVal, setSelectVal] = React.useState("Triagem");
+  return (
+    <>
+      <Row>
+        <Select
+          label="Fila"
+          icon="list-checks"
+          options={["Triagem", "Em andamento", "Resolvido"]}
+          value={selectVal}
+          onChange={setSelectVal}
+        />
+        <Select
+          options={[
+            { value: "7d", label: "Últimos 7 dias" },
+            { value: "30d", label: "Últimos 30 dias" },
+            { value: "90d", label: "Últimos 90 dias", disabled: true },
+          ]}
+          placeholder="Período"
+          size="sm"
+        />
+        <Select options={["A", "B"]} error="Escolha inválida." />
+      </Row>
+    </>
+  );
+}
+
+function ChoicesDemo() {
   const [checked, setChecked] = React.useState(true);
   const [radio, setRadio] = React.useState("email");
   const [sw, setSw] = React.useState(true);
   return (
+    <>
+      <Row>
+        <Checkbox
+          checked={checked}
+          onChange={setChecked}
+          label="Notificar por e-mail"
+          description="Você recebe um resumo diário."
+        />
+        <Checkbox label="Pendente" />
+        <Checkbox indeterminate label="Parcial" />
+        <Checkbox disabled label="Desativado" />
+      </Row>
+      <Radio
+        name="Canal"
+        value={radio}
+        onChange={setRadio}
+        options={[
+          { value: "email", label: "E-mail", description: "Resposta em até 1 dia útil." },
+          { value: "chat", label: "Chat", description: "Resposta em minutos." },
+          { value: "phone", label: "Telefone" },
+        ]}
+      />
+      <Row>
+        <Switch
+          checked={sw}
+          onChange={setSw}
+          label="Automação ativa"
+          description="Executa quando uma conversa é resolvida."
+        />
+        <Switch size="sm" label="Compacto" />
+        <Switch disabled label="Desativado" />
+      </Row>
+    </>
+  );
+}
+
+function FormulariosSection() {
+  return (
     <Section title="Formulários">
       <div className="max-w-text grid grid-cols-1 gap-5">
-        <Input label="Buscar" icon="search" placeholder="Buscar conversas, contatos…" />
-        <Input
-          label="E-mail"
-          shape="rounded"
-          placeholder="voce@empresa.com"
-          hint="Usado para notificações da conta."
-        />
-        <Input
-          label="E-mail"
-          shape="rounded"
-          error="Formato de e-mail inválido."
-          defaultValue="nao-e-email"
-        />
-        <Row>
-          <Input size="sm" placeholder="Compacto" className="flex-1" />
-          <Input size="lg" icon="search" placeholder="Grande" className="flex-1" />
-          <Input placeholder="Desativado" disabled className="flex-1" />
-        </Row>
-        <Textarea placeholder="Escreva uma resposta…" aria-label="Resposta" />
-        <Row>
-          <Select
-            label="Fila"
-            icon="list-checks"
-            options={["Triagem", "Em andamento", "Resolvido"]}
-            value={selectVal}
-            onChange={setSelectVal}
-          />
-          <Select
-            options={[
-              { value: "7d", label: "Últimos 7 dias" },
-              { value: "30d", label: "Últimos 30 dias" },
-              { value: "90d", label: "Últimos 90 dias", disabled: true },
-            ]}
-            placeholder="Período"
-            size="sm"
-          />
-          <Select options={["A", "B"]} error="Escolha inválida." />
-        </Row>
-        <Row>
-          <Checkbox
-            checked={checked}
-            onChange={setChecked}
-            label="Notificar por e-mail"
-            description="Você recebe um resumo diário."
-          />
-          <Checkbox label="Pendente" />
-          <Checkbox indeterminate label="Parcial" />
-          <Checkbox disabled label="Desativado" />
-        </Row>
-        <Radio
-          name="Canal"
-          value={radio}
-          onChange={setRadio}
-          options={[
-            { value: "email", label: "E-mail", description: "Resposta em até 1 dia útil." },
-            { value: "chat", label: "Chat", description: "Resposta em minutos." },
-            { value: "phone", label: "Telefone" },
-          ]}
-        />
-        <Row>
-          <Switch
-            checked={sw}
-            onChange={setSw}
-            label="Automação ativa"
-            description="Executa quando uma conversa é resolvida."
-          />
-          <Switch size="sm" label="Compacto" />
-          <Switch disabled label="Desativado" />
-        </Row>
+        <InputsDemo />
+        <SelectsDemo />
+        <ChoicesDemo />
       </div>
     </Section>
   );

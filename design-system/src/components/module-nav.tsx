@@ -86,6 +86,19 @@ function navItemClass(on: boolean, compact: boolean) {
   return cn(base, on ? "font-medium" : "font-normal", box);
 }
 
+function NavBadge({ on, children }: { on: boolean; children: React.ReactNode }) {
+  return (
+    <span
+      className={cn(
+        "text-2xs inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 font-semibold",
+        on ? "bg-signal text-ink-on-signal" : "bg-raised-2 text-ink",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
 function NavItem({
   item: it,
   active: on,
@@ -104,16 +117,7 @@ function NavItem({
     <>
       {it.icon && <Icon name={it.icon} size={compact ? 20 : 17} />}
       {!compact && it.label}
-      {!compact && it.badge != null && (
-        <span
-          className={cn(
-            "text-2xs inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 font-semibold",
-            on ? "bg-signal text-ink-on-signal" : "bg-raised-2 text-ink",
-          )}
-        >
-          {it.badge}
-        </span>
-      )}
+      {!compact && it.badge != null && <NavBadge on={on}>{it.badge}</NavBadge>}
     </>
   );
   const a11y = {

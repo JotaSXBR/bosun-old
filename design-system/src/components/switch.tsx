@@ -67,13 +67,33 @@ export function Switch({
   if (!label && !description) return control;
 
   return (
+    <LabeledSwitch bid={bid} label={label} description={description} disabled={disabled}>
+      {control}
+    </LabeledSwitch>
+  );
+}
+
+function LabeledSwitch({
+  bid,
+  label,
+  description,
+  disabled,
+  children,
+}: {
+  bid: string;
+  label?: React.ReactNode;
+  description?: React.ReactNode;
+  disabled: boolean;
+  children: React.ReactNode;
+}) {
+  return (
     <span
       className={cn(
         "inline-flex items-center gap-3 select-none",
         disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer",
       )}
     >
-      {control}
+      {children}
       <span className="flex flex-col gap-0.5">
         {label && (
           <label htmlFor={bid} className="text-ink-strong cursor-pointer text-sm">

@@ -22,6 +22,28 @@ export interface AvatarProps extends React.ComponentProps<"span"> {
   status?: keyof typeof STATUS_COLORS;
 }
 
+const initialsOf = (name: string) =>
+  name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase();
+
+function StatusDot({ status, d }: { status: keyof typeof STATUS_COLORS; d: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "ring-page absolute right-0 bottom-0 size-(--avatar-status) rounded-full ring-2",
+        STATUS_COLORS[status],
+      )}
+      style={{ "--avatar-status": `${Math.max(8, d * 0.24)}px` } as React.CSSProperties}
+    />
+  );
+}
+
 export function Avatar({
   src,
   name = "",
@@ -34,14 +56,7 @@ export function Avatar({
   ...props
 }: AvatarProps) {
   const d = typeof size === "number" ? size : SIZES[size];
-  const initials = name
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((p) => p[0])
-    .join("")
-    .toUpperCase();
-  const statusSize = Math.max(8, d * 0.24);
+  const initials = initialsOf(name);
   return (
     <span
       ref={ref}
@@ -64,16 +79,7 @@ export function Avatar({
           initials
         )}
       </span>
-      {status && (
-        <span
-          aria-hidden="true"
-          className={cn(
-            "ring-page absolute right-0 bottom-0 size-(--avatar-status) rounded-full ring-2",
-            STATUS_COLORS[status],
-          )}
-          style={{ "--avatar-status": `${statusSize}px` } as React.CSSProperties}
-        />
-      )}
+      {status && <StatusDot status={status} d={d} />}
     </span>
   );
 }

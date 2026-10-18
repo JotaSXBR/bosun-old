@@ -19,6 +19,19 @@ export interface CheckboxProps extends Omit<
   description?: React.ReactNode;
 }
 
+function CheckIndicator({ indeterminate }: { indeterminate: boolean }) {
+  return (
+    <CheckboxPrimitive.Indicator forceMount asChild>
+      <Icon
+        name={indeterminate ? "minus" : "check"}
+        size={13}
+        strokeWidth={2.5}
+        className="duration-base ease-standard scale-0 transition-transform data-[state=checked]:scale-100 data-[state=indeterminate]:scale-100"
+      />
+    </CheckboxPrimitive.Indicator>
+  );
+}
+
 export function Checkbox({
   checked,
   defaultChecked = false,
@@ -53,14 +66,7 @@ export function Checkbox({
       )}
       {...props}
     >
-      <CheckboxPrimitive.Indicator forceMount asChild>
-        <Icon
-          name={indeterminate ? "minus" : "check"}
-          size={13}
-          strokeWidth={2.5}
-          className="duration-base ease-standard scale-0 transition-transform data-[state=checked]:scale-100 data-[state=indeterminate]:scale-100"
-        />
-      </CheckboxPrimitive.Indicator>
+      <CheckIndicator indeterminate={indeterminate} />
     </CheckboxPrimitive.Root>
   );
 
