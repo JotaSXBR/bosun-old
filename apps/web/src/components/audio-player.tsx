@@ -7,6 +7,7 @@
 import { Icon } from "@crm/design-system/components/icon";
 import { cn } from "@crm/design-system/lib/utils";
 import { useTranslations } from "next-intl";
+import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import { AUDIO_WAVE_BARS, fallbackPeaks, loadAudioPeaks } from "@/lib/audio-peaks";
@@ -179,10 +180,10 @@ export function AudioPlayer({
             key={i}
             aria-hidden
             className={cn(
-              "min-w-0.5 flex-1 rounded-full",
+              "h-(--bar-h) min-w-0.5 flex-1 rounded-full",
               i / bars.length < played ? "bg-current" : "bg-current/35",
             )}
-            style={{ height: `${Math.round(p * 100)}%` }}
+            style={{ "--bar-h": `${Math.round(p * 100)}%` } as CSSProperties}
           />
         ))}
       </div>

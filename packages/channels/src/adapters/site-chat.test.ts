@@ -49,9 +49,8 @@ describe("SiteChatChannelProvider", () => {
     const { clientMessageId: _omit, ...body } = validBody;
     const [event] = provider.parseWebhook(request(body));
     expect(event?.type).toBe("message.received");
-    if (event?.type === "message.received") {
-      expect(event.externalMessageId).toMatch(/^[0-9a-f-]{36}$/);
-    }
+    const id = event?.type === "message.received" ? event.externalMessageId : undefined;
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("sendMessage is a no-op success for text and rejects media", async () => {

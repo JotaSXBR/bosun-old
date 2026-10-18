@@ -237,7 +237,7 @@ export function ComponentesB() {
             tone="danger"
             title="Não foi possível conectar esta ferramenta."
             description="Revise as credenciais e tente novamente."
-            onClose={() => {}}
+            onClose={() => undefined}
           />
           <Toast tone="running" title="Sincronizando contatos…" />
         </div>

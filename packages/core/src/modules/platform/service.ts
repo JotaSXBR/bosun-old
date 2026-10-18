@@ -61,7 +61,7 @@ function resolveEmail(
   stored?: Record<string, unknown>,
 ): ServerEnv["email"] {
   const merged = mergeDefined(env, stored ?? {});
-  const smtpStored = stored?.["smtp"];
+  const smtpStored = stored?.smtp;
   if (smtpStored && typeof smtpStored === "object") {
     merged.smtp = mergeDefined(env.smtp, smtpStored);
   }
@@ -292,15 +292,15 @@ export async function setPlatformSetting(
   const existing = structuredClone(stored[group] ?? {});
   for (const path of cleared) unsetPath(existing, path);
   const merged: Record<string, unknown> = mergeDefined(existing, parsed);
-  const existingSmtp = existing["smtp"];
-  const parsedSmtp = parsed["smtp"];
+  const existingSmtp = existing.smtp;
+  const parsedSmtp = parsed.smtp;
   if (
     existingSmtp &&
     typeof existingSmtp === "object" &&
     parsedSmtp &&
     typeof parsedSmtp === "object"
   ) {
-    merged["smtp"] = mergeDefined(existingSmtp, parsedSmtp);
+    merged.smtp = mergeDefined(existingSmtp, parsedSmtp);
   }
   const valueEncrypted = encryptJson(merged);
   await withPlatformScope(db, (tx) =>

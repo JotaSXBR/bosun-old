@@ -99,7 +99,7 @@ describe("tenant RLS isolation", () => {
   });
 
   it("rejects a non-uuid organization id", async () => {
-    await expect(withTenant(db, "not-a-uuid", async () => {})).rejects.toThrowError(
+    await expect(withTenant(db, "not-a-uuid", () => Promise.resolve())).rejects.toThrowError(
       /invalid organization id/i,
     );
   });

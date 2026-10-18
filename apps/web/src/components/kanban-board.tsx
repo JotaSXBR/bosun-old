@@ -151,10 +151,10 @@ export function KanbanBoard({
               stages={columns.map((c) => c.stage)}
               canWrite={false}
               canManage={false}
-              onEdit={() => {}}
-              onLabels={() => {}}
-              onDelete={() => {}}
-              onMove={() => {}}
+              onEdit={() => undefined}
+              onLabels={() => undefined}
+              onDelete={() => undefined}
+              onMove={() => undefined}
             />
           ) : null}
         </DragOverlay>

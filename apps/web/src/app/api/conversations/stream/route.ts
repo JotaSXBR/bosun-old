@@ -22,7 +22,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   const encoder = new TextEncoder();
-  let cleanup = (): void => {};
+  let cleanup = (): void => undefined;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;

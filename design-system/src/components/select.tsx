@@ -140,9 +140,7 @@ export function Select({
         // empty state — coerce only when the caller clearly intends controlled
         // (has onChange and no defaultValue); a true uncontrolled Select keeps
         // receiving undefined.
-        value={
-          value !== undefined ? value : onChange && defaultValue === undefined ? "" : undefined
-        }
+        value={value ?? (onChange && defaultValue === undefined ? "" : undefined)}
         defaultValue={defaultValue}
         onValueChange={onChange}
         disabled={disabled}

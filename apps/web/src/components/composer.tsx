@@ -488,7 +488,7 @@ export function Composer({
             const next = e.target.value;
             setText(next);
             if (mode === "reply") presence.signal("typing");
-            const caret = e.target.selectionStart ?? next.length;
+            const caret = e.target.selectionStart;
             const trigger = MACRO_TRIGGER.exec(next.slice(0, caret));
             setMacroQuery(trigger ? (trigger[1] ?? "").toLowerCase() : null);
             setMacroActive(0);

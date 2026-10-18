@@ -39,7 +39,8 @@ export default async function AiModuleLayout({ children }: { children: ReactNode
   const pending = suggestions.filter((s) => s.status === "pending").length;
   const credential = credentials[0];
   const modeKey =
-    OBSERVER_MODE_KEYS[settings.aiObserverMode as keyof typeof OBSERVER_MODE_KEYS] ?? "modeOff";
+    (OBSERVER_MODE_KEYS as Record<string, string | undefined>)[settings.aiObserverMode] ??
+    "modeOff";
 
   return (
     <main className="p-page-pad mx-auto max-w-3xl space-y-6">

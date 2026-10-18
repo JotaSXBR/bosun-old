@@ -146,19 +146,19 @@ describe("platform settings service", () => {
     const email = summaries.find((s) => s.group === "email");
     expect(email).toBeDefined();
     expect(email!.configured).toBe(true);
-    expect(email!.values["provider"]).toBe("smtp");
-    expect(email!.values["from"]).toBe("it@crm.local");
-    expect((email!.values["smtp"] as Record<string, unknown>)["password"]).toBeUndefined();
+    expect(email!.values.provider).toBe("smtp");
+    expect(email!.values.from).toBe("it@crm.local");
+    expect((email!.values.smtp as Record<string, unknown>).password).toBeUndefined();
     expect(email!.secretsSet["smtp.password"]).toBe(true);
-    expect(email!.secretsSet["resendApiKey"]).toBe(Boolean(getServerEnv().email.resendApiKey));
+    expect(email!.secretsSet.resendApiKey).toBe(Boolean(getServerEnv().email.resendApiKey));
     expect(email!.dbFields).toEqual(
       expect.arrayContaining(["provider", "from", "smtp.host", "smtp.password"]),
     );
     expect(email!.updatedAt).toBeInstanceOf(Date);
 
     const ai = summaries.find((s) => s.group === "ai");
-    expect(ai!.secretsSet["openaiApiKey"]).toBe(true);
-    expect(ai!.values["openaiApiKey"]).toBeUndefined();
+    expect(ai!.secretsSet.openaiApiKey).toBe(true);
+    expect(ai!.values.openaiApiKey).toBeUndefined();
   });
 
   it("blank non-secret fields clear the stored override back to env", async () => {
@@ -185,7 +185,7 @@ describe("platform settings service", () => {
     const summary = (await listPlatformSettingSummaries(db, platformAdmin())).find(
       (s) => s.group === "ai",
     );
-    expect(summary!.secretsSet["openaiApiKey"]).toBe(Boolean(env.ai.openaiApiKey));
+    expect(summary!.secretsSet.openaiApiKey).toBe(Boolean(env.ai.openaiApiKey));
     // The corrupt row is skipped on read — a fresh save starts clean.
     await setPlatformSetting(db, platformAdmin(), "ai", { openaiApiKey: "sk-it-healed" });
     expect((await resolveProductSettings(db)).ai.openaiApiKey).toBe("sk-it-healed");

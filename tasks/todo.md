@@ -5,10 +5,10 @@ Plano: `tasks/plan.md`. Branch: `chore/lint-warnings`. Um commit por tarefa,
 
 ## Task 1: Regras triviais, todos os pacotes
 
-- [ ] `dot-notation` (core 12, ai 1), `prefer-includes` (1), `prefer-nullish-coalescing` (2), `no-unnecessary-condition` (2)
-- [ ] `non-nullable-type-assertion-style` (storage 8)
-- [ ] `no-empty-function` (~20: testes, showcase, mocks), `vitest/no-conditional-expect` (7)
-- [ ] `shadcn/no-inline-styles` (4), `shadcn/require-static-classes` (2)
+- [x] `dot-notation` (core 12, ai 1), `prefer-includes` (1), `prefer-nullish-coalescing` (2), `no-unnecessary-condition` (2)
+- [x] `non-nullable-type-assertion-style` (storage 8)
+- [x] `no-empty-function` (~20: testes, showcase, mocks), `vitest/no-conditional-expect` (7)
+- [x] `shadcn/no-inline-styles` (4), `shadcn/require-static-classes` (2)
 - **Acceptance**: essas regras com 0 ocorrências em todos os pacotes; nenhuma mudança de comportamento
 - **Verify**: `pnpm lint` (contagem das regras) · `pnpm typecheck` · `pnpm test`
 - **Deps**: nenhuma · **Tamanho**: M (muitos arquivos, 1–3 linhas cada; dividir em 2 commits se passar de 5 pacotes)

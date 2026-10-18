@@ -142,10 +142,10 @@ function BadgeTagSection() {
         <Tag>Etiqueta</Tag>
         <Tag icon="list-checks">Triagem</Tag>
         <Tag selected>Selecionada</Tag>
-        <Tag onRemove={() => {}} icon="sparkles">
+        <Tag onRemove={() => undefined} icon="sparkles">
           Removível
         </Tag>
-        <Tag onClick={() => {}}>Clicável</Tag>
+        <Tag onClick={() => undefined}>Clicável</Tag>
         <Tag size="sm">Compacta</Tag>
       </Row>
     </Section>

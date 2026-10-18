@@ -196,7 +196,7 @@ export function VoiceRecorder({
           .arrayBuffer()
           .then((bytes) => decodeAudioPeaks(bytes, AUDIO_WAVE_BARS))
           .then((peaks) => setState((s) => (s.phase === "preview" ? { ...s, peaks } : s)))
-          .catch(() => {});
+          .catch(() => undefined);
       };
       media.current.recorder = recorder;
       recorder.start(250);

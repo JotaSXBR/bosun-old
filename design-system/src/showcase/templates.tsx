@@ -37,15 +37,15 @@ function PaletteDemo() {
           {
             label: "Ações",
             items: [
-              { id: "new", icon: "square-check", label: "Criar tarefa", onSelect: () => {} },
-              { id: "flow", icon: "workflow", label: "Nova automação", onSelect: () => {} },
+              { id: "new", icon: "square-check", label: "Criar tarefa", onSelect: () => undefined },
+              { id: "flow", icon: "workflow", label: "Nova automação", onSelect: () => undefined },
             ],
           },
           {
             label: "Módulos",
             items: [
-              { id: "inbox", icon: "inbox", label: "Atendimento", onSelect: () => {} },
-              { id: "deals", icon: "folder-kanban", label: "Negócios", onSelect: () => {} },
+              { id: "inbox", icon: "inbox", label: "Atendimento", onSelect: () => undefined },
+              { id: "deals", icon: "folder-kanban", label: "Negócios", onSelect: () => undefined },
             ],
           },
         ]}

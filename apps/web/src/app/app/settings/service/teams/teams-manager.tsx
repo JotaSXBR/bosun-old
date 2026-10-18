@@ -9,6 +9,7 @@ import { Select } from "@crm/design-system/components/select";
 import { toast } from "@crm/design-system/components/toast";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import type { CSSProperties } from "react";
 import { useState, useTransition } from "react";
 
 import type { TeamsActionResult } from "@/server/actions/teams";
@@ -182,8 +183,8 @@ function TeamRow({
         ) : (
           <div className="flex items-center gap-3">
             <span
-              className="inline-block h-4 w-4 rounded-full border"
-              style={{ backgroundColor: team.color ?? "transparent" }}
+              className="inline-block h-4 w-4 rounded-full border bg-(color:--team-color)"
+              style={{ "--team-color": team.color ?? "transparent" } as CSSProperties}
               aria-hidden
             />
             <span className="font-medium">{team.name}</span>

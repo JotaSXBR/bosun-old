@@ -115,7 +115,7 @@ describe("buildToolSet", () => {
     };
     buildToolSet(ctx("agent"), reg, agent(["echo"]));
     // execute is a closure over ctx — verify by invoking the definition
-    await reg["echo"]?.execute(ctx("agent"), {} as never);
+    await reg.echo?.execute(ctx("agent"), {} as never);
     expect(seen).toEqual([ctx("agent").organizationId]);
   });
 });

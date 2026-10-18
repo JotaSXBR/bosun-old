@@ -62,7 +62,7 @@ function resolveVar(
 ): string {
   const scopes = file ? fileScopes[file] : mergedScopes;
   let value = scopes[scope][name] ?? scopes.root[name] ?? "";
-  for (let i = 0; i < 10 && /var\(--/.test(value); i++) {
+  for (let i = 0; i < 10 && value.includes("var(--"); i++) {
     value = value.replace(
       /var\((--[\w-]+)\)/g,
       (_m, n: string) => scopes[scope][n] ?? scopes.root[n] ?? "",
@@ -213,18 +213,13 @@ describe("typography", () => {
       expect(map, `typography.${key} has no token mapping`).toBeDefined();
       if (!map) continue;
       const level = typography[key]!;
-      if (map.size) {
-        expect(cssValue(map.size), `typography.${key}.fontSize`).toBe(docValue(level.fontSize));
-      }
-      if (map.leading) {
-        expect(cssValue(map.leading), `typography.${key}.lineHeight`).toBe(
-          docValue(level.lineHeight),
-        );
-      }
-      if (map.tracking) {
-        expect(cssValue(map.tracking), `typography.${key}.letterSpacing`).toBe(
-          docValue(level.letterSpacing),
-        );
+      const checks: [label: string, token: string | undefined, documented: unknown][] = [
+        [`typography.${key}.fontSize`, map.size, level.fontSize],
+        [`typography.${key}.lineHeight`, map.leading, level.lineHeight],
+        [`typography.${key}.letterSpacing`, map.tracking, level.letterSpacing],
+      ];
+      for (const [label, token, documented] of checks.filter(([, t]) => t)) {
+        expect(cssValue(token!), label).toBe(docValue(documented));
       }
     }
   });

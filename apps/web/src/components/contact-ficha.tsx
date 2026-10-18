@@ -3,7 +3,6 @@
 import type { UpdateContactProfileInput } from "@crm/core/contacts";
 import type { LabelRow } from "@crm/core/leads";
 import { Avatar } from "@crm/design-system/components/avatar";
-import { Badge } from "@crm/design-system/components/badge";
 import { Card } from "@crm/design-system/components/card";
 import { toast } from "@crm/design-system/components/toast";
 import { cn } from "@crm/design-system/lib/utils";
@@ -203,13 +202,15 @@ export function ContactFicha({
         <span className="text-ink-muted text-xs">{t("contactTags")}</span>
         <div className="flex flex-wrap gap-1">
           {contactLabels.map((label) => (
-            <Badge
+            <span
               key={label.id}
-              tone="neutral"
-              className={cn("text-xs", paletteStyle(label.color).chip)}
+              className={cn(
+                "rounded-pill inline-flex h-6 items-center px-2.5 text-xs leading-none font-medium whitespace-nowrap",
+                paletteStyle(label.color).chip,
+              )}
             >
               {label.name}
-            </Badge>
+            </span>
           ))}
           {contactLabels.length === 0 && (
             <span className="text-ink-muted text-xs">{tl("panel.noLabelsShort")}</span>
@@ -234,13 +235,15 @@ export function ContactFicha({
         <span className="text-ink-muted text-xs">{t("conversationLabels")}</span>
         <div className="flex flex-wrap gap-1">
           {conversationLabels.map((label) => (
-            <Badge
+            <span
               key={label.id}
-              tone="neutral"
-              className={cn("text-xs", paletteStyle(label.color).chip)}
+              className={cn(
+                "rounded-pill inline-flex h-6 items-center px-2.5 text-xs leading-none font-medium whitespace-nowrap",
+                paletteStyle(label.color).chip,
+              )}
             >
               {label.name}
-            </Badge>
+            </span>
           ))}
           {conversationLabels.length === 0 && (
             <span className="text-ink-muted text-xs">{tl("panel.noLabelsShort")}</span>

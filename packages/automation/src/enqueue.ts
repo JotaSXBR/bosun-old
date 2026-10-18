@@ -28,7 +28,7 @@ async function send(name: string, payload: object, tx?: DbExecutor): Promise<{ s
     // `starting` singleton in boss.ts dedupes concurrent kicks). This
     // enqueue is still skipped — webhook retries and the reconcile sweep
     // cover the gap. Callers must not fail on a missing queue.
-    startJobs().catch(() => {});
+    startJobs().catch(() => undefined);
     logger.warn("jobs not started; skipping enqueue", { queue: name });
     return { skipped: true };
   }
@@ -126,7 +126,7 @@ export async function enqueueContactGoogleSync(
 ): Promise<{ skipped: boolean }> {
   const boss = getBoss();
   if (!boss) {
-    startJobs().catch(() => {});
+    startJobs().catch(() => undefined);
     logger.warn("jobs not started; skipping enqueue", { queue: QUEUES.contactGoogleSync });
     return { skipped: true };
   }
@@ -153,7 +153,7 @@ export async function enqueueContactGoogleSweep(payload: {
 }): Promise<{ skipped: boolean }> {
   const boss = getBoss();
   if (!boss) {
-    startJobs().catch(() => {});
+    startJobs().catch(() => undefined);
     logger.warn("jobs not started; skipping enqueue", { queue: QUEUES.contactGoogleSweep });
     return { skipped: true };
   }
