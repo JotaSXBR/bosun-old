@@ -647,24 +647,13 @@ invitation:create`): lista + convites pendentes com **link copiável
   PRs #1 e #2 foram criadas via `gh` fallback). Diagnosticar se é
   transporte/sessão do MCP local. Regra atual: MCP primeiro, `gh` CLI como
   fallback em operações de pull request após a primeira falha (AGENTS.md).
-- **P3 — Promover warns a error** — o orçamento de warns agora vive em
-  `docs/development/code-quality-standard.md` §2.3 (contagem medida por
-  regra, 2026-10-10; promoção quando a contagem zerar). Nota: o branch
-  `chore/lint-warnings` citado aqui antes não mergeou — as contagens
-  atuais ainda mostram violações (`max-statements` 68,
-  `no-unnecessary-condition` 4, `prefer-nullish-coalescing` 1);
-  `complexity` está zerado e já virou `error` na config.
-
-- **P2 — Zerar os warnings de lint (componentes, tamanho, função)** —
-  decidido 2026-10-15: assim que o ship de `feat/google-contacts-connection`
-  (slice 1/3 do Google Contacts) fechar, abrir um plan dedicado
-  (`/plan` com `## Escopo` por pacote) para resolver os avisos de
-  `max-lines`, `max-lines-per-function`, `max-params`, `max-statements`,
-  regras de componente e afins. Medição de 2026-10-15 (warnings por
-  pacote): core 121, web 147, design-system 38, auth 15, storage 8,
-  config 4, db 2, ai 1. Fatiar por pacote/regra (≈100 linhas por commit),
-  sem misturar com feature, e só depois promover a `error`
-  (ver item acima).
+- **P3 — `no-inline-styles` do `deal-card`** — 2 warnings restantes
+  (`transform`/`transition` do dnd-kit em `deal-card.tsx`); decidir entre
+  aceitar animação levemente diferente com classes/variáveis CSS ou um
+  override documentado em `tooling/eslint`. Orçamento em
+  `docs/development/code-quality-standard.md` §2.3. (Zerar os warnings de
+  lint e promover as regras a `error` foi concluído em 2026-10-19,
+  branch `chore/lint-warnings`.)
 
 ## Concluído
 

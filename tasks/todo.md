@@ -84,8 +84,8 @@ Plano: `tasks/plan.md`. Branch: `chore/lint-warnings`. Um commit por tarefa,
 
 ## Task 10: Promover a `error` e fechar
 
-- [ ] `tooling/eslint/base.js`: regras zeradas `warn` → `error`
-- [ ] `docs/development/code-quality-standard.md` §2.3 e `TODO.md` atualizados
+- [x] `tooling/eslint/base.js`: regras zeradas `warn` → `error`
+- [x] `docs/development/code-quality-standard.md` §2.3 e `TODO.md` atualizados
 - **Acceptance**: reintroduzir uma violação quebra o lint
 - **Verify**: `pnpm verify:full` · commit local, PR só a pedido
 - **Deps**: 1–9 · **Tamanho**: S

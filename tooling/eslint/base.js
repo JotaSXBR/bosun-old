@@ -77,14 +77,11 @@ export default tseslint.config(
       //   array-type: 16 — `T[]` vs `Array<T>` is style, not quality
       "@typescript-eslint/consistent-type-definitions": "off",
       "@typescript-eslint/array-type": "off",
-      // Defect-adjacent stylistic rules with existing violations — warn
-      // budgets until the counts reach zero (counts recorded in the standard
-      // doc): no-empty-function 16, dot-notation 13,
-      // non-nullable-type-assertion-style 9, prefer-includes 1.
-      "@typescript-eslint/no-empty-function": "warn",
-      "@typescript-eslint/dot-notation": "warn",
-      "@typescript-eslint/non-nullable-type-assertion-style": "warn",
-      "@typescript-eslint/prefer-includes": "warn",
+      // Defect-adjacent stylistic rules — zero violations measured 2026-10 → error.
+      "@typescript-eslint/no-empty-function": "error",
+      "@typescript-eslint/dot-notation": "error",
+      "@typescript-eslint/non-nullable-type-assertion-style": "error",
+      "@typescript-eslint/prefer-includes": "error",
       // Always-a-bug tier (all files, JS and TS alike).
       "no-var": "error",
       "prefer-const": "error",
@@ -163,27 +160,26 @@ export default tseslint.config(
     },
   },
   {
-    // Size/complexity budget — refactoring pressure, not a hard gate. Each
+    // Size/complexity gate. Each
     // threshold is the rule's documented default; the canonical NIST target
-    // for cyclomatic complexity is 10 (NIST SP 500-235 §2.5). Every rule is
-    // "warn" until its violation count reaches zero, then it is promoted to
-    // "error" — see docs/development/code-quality-standard.md.
+    // for cyclomatic complexity is 10 (NIST SP 500-235 §2.5). All rules are "error" since the 2026-10
+    // lint-warnings cleanup — see docs/development/code-quality-standard.md §2.3.
     files: ["**/src/**/*.{ts,tsx}"],
     plugins: { sonarjs },
     rules: {
       // Understandability (hard to follow) — SonarSource default.
-      "sonarjs/cognitive-complexity": ["warn", 15],
+      "sonarjs/cognitive-complexity": ["error", 15],
       // Testability (min tests for full path coverage) — ESLint default.
       // Zero violations measured 2026-10 → error.
       complexity: ["error", 20],
       "max-depth": ["error", 4],
-      "max-params": ["warn", 3],
+      "max-params": ["error", 3],
       // Too much in one place.
-      "max-statements": ["warn", { max: 10 }],
+      "max-statements": ["error", { max: 10 }],
       // Zero violations measured 2026-10 → error.
       "max-nested-callbacks": ["error", 10],
-      "max-lines-per-function": ["warn", { max: 50, skipBlankLines: true, skipComments: true }],
-      "max-lines": ["warn", { max: 300, skipBlankLines: true, skipComments: true }],
+      "max-lines-per-function": ["error", { max: 50, skipBlankLines: true, skipComments: true }],
+      "max-lines": ["error", { max: 300, skipBlankLines: true, skipComments: true }],
     },
   },
   // Import boundaries. NOTE: in flat config, when two config objects set the
@@ -268,15 +264,14 @@ export default tseslint.config(
   {
     // Promotions from strictTypeChecked, adopted 2026-10 after a repo-wide
     // violation count: the three "error" rules had zero violations;
-    // nullish-coalescing (1) and unnecessary-condition (4) stay at warn until
-    // their counts reach zero. See docs/adr/0013.
+    // nullish-coalescing and unnecessary-condition were promoted once their counts reached zero. See docs/adr/0013.
     files: ["**/*.{ts,tsx}"],
     rules: {
       "@typescript-eslint/prefer-optional-chain": "error",
       "@typescript-eslint/no-unnecessary-type-assertion": "error",
       "@typescript-eslint/restrict-template-expressions": ["error", { allowNumber: true }],
-      "@typescript-eslint/prefer-nullish-coalescing": "warn",
-      "@typescript-eslint/no-unnecessary-condition": "warn",
+      "@typescript-eslint/prefer-nullish-coalescing": "error",
+      "@typescript-eslint/no-unnecessary-condition": "error",
     },
   },
   {
@@ -301,16 +296,14 @@ export default tseslint.config(
       "max-lines-per-function": "off",
       "max-nested-callbacks": "off",
       "no-console": "off",
-      "max-lines": ["warn", { max: 300, skipBlankLines: true, skipComments: true }],
+      "max-lines": ["error", { max: 300, skipBlankLines: true, skipComments: true }],
       "@typescript-eslint/no-non-null-assertion": "off",
       "@typescript-eslint/unbound-method": "off",
       ...vitest.configs.recommended.rules,
       // Vitest's expect takes an optional message as arg 2
       // (vitest.dev/api/expect) — the rule's default maxArgs:1 predates that.
       "vitest/valid-expect": ["error", { maxArgs: 2 }],
-      // 7 existing violations (all guarded by a preceding assertion or
-      // optional-field semantics) — warn budget until the count is zero.
-      "vitest/no-conditional-expect": "warn",
+      "vitest/no-conditional-expect": "error",
     },
   },
   // Prettier owns formatting; this disables any lint rule that could fight
