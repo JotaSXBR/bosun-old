@@ -1,15 +1,17 @@
 import type { ServerEnv } from "@crm/config";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // pg-boss and every task module are faked: this pins the wiring in boss.ts
 // (which queue runs which handler, which crons exist), not the handlers.
+type Batch = Array<{ data: unknown }>;
+
 const fake = vi.hoisted(() => ({
   instance: {
     on: vi.fn(),
     start: vi.fn(),
-    createQueue: vi.fn(),
-    work: vi.fn(),
-    schedule: vi.fn(),
+    createQueue: vi.fn<(name: string, options?: { policy: string }) => void>(),
+    work: vi.fn<(name: string, handler: (jobs: Batch) => Promise<void>) => void>(),
+    schedule: vi.fn<(name: string, cron: string) => void>(),
   },
 }));
 
@@ -43,10 +45,16 @@ async function boot() {
 /** The handler registered for a queue, as pg-boss would call it with a batch. */
 function workerFor(queue: string) {
   const call = fake.instance.work.mock.calls.find(([name]) => name === queue);
-  return call?.[1] as ((jobs: Array<{ data: unknown }>) => Promise<void>) | undefined;
+  return call?.[1];
 }
 
 describe("startJobs wiring", () => {
+  // The runner shares workers across files (isolate: false): drop the started
+  // `boss` singleton so enqueue.test.ts still sees "jobs not started".
+  afterEach(() => {
+    vi.resetModules();
+  });
+
   beforeEach(() => {
     for (const fn of Object.values(fake.instance)) fn.mockReset();
     fake.instance.start.mockResolvedValue(undefined);

@@ -28,10 +28,10 @@ PR B = tarefas 1, 3, 4, 5 (branch `test/coverage-debt`). Um commit por tarefa.
 
 ## Task 4: Camada de teste de hooks no `web`
 
-- [ ] `jsdom` + `@testing-library/react` (versões compatíveis) em `apps/web` devDependencies
-- [ ] ambiente jsdom só nos arquivos que precisam (docblock ou projeto), sem afetar os testes node
-- [ ] `use-run-action.test.tsx`: `{ok:false}` → `toast.error`, sem `onSuccess`/refresh; `{ok:true}` → toast de sucesso, `onSuccess`, `router.refresh`
-- [ ] `use-on-open.test.tsx`: dispara uma vez por transição false→true; não na montagem aberta nem em re-render
+- [x] `jsdom` + `@testing-library/react` (versões compatíveis) em `apps/web` devDependencies
+- [x] ambiente jsdom só nos arquivos que precisam (docblock ou projeto), sem afetar os testes node
+- [x] `use-run-action.test.tsx`: `{ok:false}` → `toast.error`, sem `onSuccess`/refresh; `{ok:true}` → toast de sucesso, `onSuccess`, `router.refresh`
+- [x] `use-on-open.test.tsx`: dispara uma vez por transição false→true; não na montagem aberta nem em re-render
 - **Acceptance**: contagem de testes node inalterada; os novos passam; mutação (inverter a condição) vira RED
 - **Verify**: `pnpm --filter @crm/web test` · `pnpm test` (suíte inteira, sem vazamento de `window`)
 - **Deps**: nenhuma · **Tamanho**: M
