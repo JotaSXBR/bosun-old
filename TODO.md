@@ -661,11 +661,7 @@ invitation:create`): lista + convites pendentes com **link copiável
   `/design-system` e do kanban espera esse repasse). Também sem e2e: menu
   "▾" da mensagem e o sucesso de reagir/editar/excluir contra um provider
   real.
-- **P3 — Avisos do `pnpm audit --prod`** (3, transitivos de ferramentas de
-  dev): `esbuild` via `drizzle-kit`/`vite` (moderate + low) e `braces` via
-  `eslint-config-next` (high, sem versão corrigida segundo o auditor). Plano:
-  `overrides` em `pnpm-workspace.yaml` para o `esbuild`; `braces` só
-  documentado se não houver correção.
+- **P3 — `braces` no `pnpm audit --prod`** (1 high, GHSA-vfj7-8cjw-p6xm, stack-exhaustion DoS em `braces` ≤3.0.3): a última versão publicada é a 3.0.3 e o advisory não tem versão corrigida, então não há override possível. Vem só de `tooling/eslint > eslint-config-next > @next/eslint-plugin-next > fast-glob > micromatch` (lint em dev/CI, nunca no caminho de requisição). **Aceito**; reavaliar quando o `micromatch` ou o `fast-glob` trocarem de dependência, ou o advisory ganhar correção. Os avisos de `esbuild` foram fechados com `overrides` em `pnpm-workspace.yaml` (2026-10-19).
 
 ## Concluído
 

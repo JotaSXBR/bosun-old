@@ -5,15 +5,15 @@ PR B = tarefas 1, 3, 4, 5 (branch `test/coverage-debt`). Um commit por tarefa.
 
 ## Task 1: Registrar a dívida no `TODO.md`
 
-- [ ] Itens P3 em Produto — backlog: boss.ts / findConversation / useRunAction+useOnOpen / drag do kanban / macro-picker; audio+voice (staging do usuário); design-system (repasse com Claude Design); avisos do audit
+- [x] Itens P3 em Produto — backlog: boss.ts / findConversation / useRunAction+useOnOpen / drag do kanban / macro-picker; audio+voice (staging do usuário); design-system (repasse com Claude Design); avisos do audit
 - **Acceptance**: cada item com prioridade e o motivo de estar fora desta rodada
 - **Verify**: `pnpm format:check`
 - **Deps**: nenhuma · **Tamanho**: XS
 
 ## Task 2: Overrides de `esbuild` e decisão sobre `braces` (PR A)
 
-- [ ] `pnpm why` confirma as cadeias; `overrides` em `pnpm-workspace.yaml` por faixa para `esbuild`
-- [ ] `braces`: confirmar se há versão corrigida; se não, documentar aceite
+- [x] `pnpm why` confirma as cadeias; `overrides` em `pnpm-workspace.yaml` por faixa para `esbuild`
+- [x] `braces`: confirmar se há versão corrigida; se não, documentar aceite
 - **Acceptance**: `pnpm audit --prod` sem o `esbuild` (e sem `braces` se houver correção); `db:generate` ainda "No schema changes"
 - **Verify**: `pnpm audit --prod` · `pnpm db:generate` · `pnpm verify:full` · CI
 - **Deps**: nenhuma · **Tamanho**: S

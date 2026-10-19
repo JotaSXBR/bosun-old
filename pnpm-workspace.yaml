@@ -39,3 +39,11 @@ allowBuilds:
   # repo owner, i18n slice).
   "@swc/core": false
   "@parcel/watcher": false
+
+# Advisories GHSA-67mh-4wv8-2f99 (esbuild <=0.24.2, via drizzle-kit's
+# @esbuild-kit loader) and GHSA-g7r4-m6w7-qqqr (0.27.3–0.28.0, via tsx/vite):
+# dev tooling only, pinned past the fixed versions. Drop an entry when its
+# parent moves to a patched esbuild on its own.
+overrides:
+  "esbuild@<0.25.0": 0.25.12
+  "esbuild@>=0.27.3 <0.28.1": 0.28.2
