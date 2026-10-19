@@ -12,7 +12,7 @@ export default mergeConfig(
     test: {
       include: [
         "packages/**/*.test.ts",
-        "apps/**/*.test.ts",
+        "apps/**/*.test.{ts,tsx}",
         "design-system/**/*.test.ts",
         ".claude/hooks/**/*.test.mjs",
       ],
