@@ -1,6 +1,6 @@
 "use client";
 
-// Shared by the settings islands: runs a server action inside a transition,
+// Shared by the settings islands and ticket actions: runs a server action inside a transition,
 // toasts a failure (or the success message) and refreshes the route.
 import { toast } from "@crm/design-system/components/toast";
 import { useRouter } from "next/navigation";

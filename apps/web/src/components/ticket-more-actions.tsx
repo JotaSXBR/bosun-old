@@ -18,11 +18,10 @@ import {
 import { useFormatter, type useTranslations } from "next-intl";
 import { useState } from "react";
 
+import type { RunAction } from "@/lib/use-run-action";
 import { snoozeConversationAction, transferConversationAction } from "@/server/actions/messaging";
 
-export type ActionResult = { ok: true } | { ok: false; error: string };
 export type T = ReturnType<typeof useTranslations>;
-export type RunAction = (action: Promise<ActionResult>) => void;
 
 const SNOOZE_PRESET_KEY = {
   "1h": "snooze1h",

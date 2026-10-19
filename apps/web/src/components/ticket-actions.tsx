@@ -7,13 +7,8 @@ import { Button } from "@crm/design-system/components/button";
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 
-import {
-  MoreActions,
-  type RunAction,
-  snoozeTarget,
-  type T,
-} from "@/components/ticket-more-actions";
-import { useRunAction } from "@/lib/use-run-action";
+import { MoreActions, snoozeTarget, type T } from "@/components/ticket-more-actions";
+import { type RunAction, useRunAction } from "@/lib/use-run-action";
 import {
   pickupConversationAction,
   reopenTicketAction,

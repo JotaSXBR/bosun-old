@@ -4,8 +4,9 @@ import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import type { ConversationRow } from "./repository";
-export * from "./reads-messages";
 import type { ConversationView } from "./schemas";
+
+export * from "./reads-messages";
 
 const { contacts, conversationReads, conversations, teams, users } = schema;
 

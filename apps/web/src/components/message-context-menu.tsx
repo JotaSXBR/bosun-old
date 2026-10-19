@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@crm/design-system/lib/utils";
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 
 import {
   type MenuAccess,
@@ -19,7 +19,7 @@ function useDismissOnOutside(active: boolean, close: () => void) {
   useEffect(() => {
     if (!active) return;
     const onClick = (e: MouseEvent) => {
-      if (!panelRef.current?.contains(e.target as Node)) close();
+      if (!panelRef.current || !e.composedPath().includes(panelRef.current)) close();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
@@ -101,14 +101,15 @@ function ContextPanel(
 export function MessageContextMenu(
   props: TargetProps & MenuAccess & { children: React.ReactNode },
 ) {
-  const { children, canReact, canEdit, canDelete, replyTarget } = props;
+  const { children, ...target } = props;
+  const { canReact, canEdit, canDelete, replyTarget } = target;
   const [pos, setPos] = useState<Pos | null>(null);
   const enabled = canReact || canEdit || canDelete || !!replyTarget;
 
-  const close = () => {
+  const close = useCallback(() => {
     setPos(null);
-    if (closeCurrentContextMenu) closeCurrentContextMenu = null;
-  };
+    closeCurrentContextMenu = null;
+  }, []);
   const panelRef = useDismissOnOutside(pos !== null, close);
 
   const open = (e: React.MouseEvent) => {
@@ -128,7 +129,7 @@ export function MessageContextMenu(
       <div className="contents" onContextMenu={open}>
         {children}
       </div>
-      {pos && <ContextPanel key={pos.id} {...props} pos={pos} panelRef={panelRef} close={close} />}
+      {pos && <ContextPanel key={pos.id} {...target} pos={pos} panelRef={panelRef} close={close} />}
     </>
   );
 }

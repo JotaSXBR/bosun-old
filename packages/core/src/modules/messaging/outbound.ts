@@ -175,14 +175,14 @@ async function persistSentMessage(
   });
 }
 
+export { resendFailedMessage } from "./outbound-resend";
+
 /**
  * Requires messaging:write. Sends a channel message (text or media already
  * uploaded to storage — `content.url` is the signed GET the provider
  * fetches) through the provider, then persists it. `replyToId` quotes a
  * message on the remote side.
  */
-export { resendFailedMessage } from "./outbound-resend";
-
 export async function sendChannelMessage(
   db: Database,
   ctx: TenantContext,

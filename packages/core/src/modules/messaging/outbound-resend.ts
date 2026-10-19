@@ -14,6 +14,21 @@ import { getMessage, markMessageSent } from "./repository-messages";
 import type { MessageActionInput } from "./schemas";
 import { messageActionInput } from "./schemas";
 
+/** Wraps a provider failure — sync throw or rejection — as SEND_FAILED. */
+async function sendOrFail(
+  provider: ChannelProvider,
+  message: Parameters<ChannelProvider["sendMessage"]>[0],
+): Promise<SendMessageResult> {
+  try {
+    return await provider.sendMessage(message);
+  } catch (cause) {
+    throw new DomainError(
+      "SEND_FAILED",
+      `Provider failed to resend the message: ${(cause as Error).message}`,
+    );
+  }
+}
+
 type ResendDeps = { provider?: ChannelProvider; signUrl?: (storageKey: string) => Promise<string> };
 
 async function loadResendable(
@@ -107,13 +122,6 @@ export async function resendFailedMessage(
     deps?.provider ??
     (await providerForConnection(db, ctx.organizationId, conversation.channelConnectionId));
   const content = await resendContent(message, deps?.signUrl);
-  const sent = await provider
-    .sendMessage({ to: conversation.externalId, content })
-    .catch((cause: unknown) => {
-      throw new DomainError(
-        "SEND_FAILED",
-        `Provider failed to resend the message: ${(cause as Error).message}`,
-      );
-    });
+  const sent = await sendOrFail(provider, { to: conversation.externalId, content });
   return persistResentMessage(db, ctx, { conversation, message, content, sent });
 }

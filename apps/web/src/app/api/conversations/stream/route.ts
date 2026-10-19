@@ -23,9 +23,6 @@ export async function GET(request: NextRequest): Promise<Response> {
     signal: request.signal,
     organizationId: ctx.organizationId,
     routeTag: ROUTE_TAG,
-    onEvent: (event, send) =>
-      send(`data: ${JSON.stringify(event)}
-
-`),
+    onEvent: (event, send) => send(`data: ${JSON.stringify(event)}\n\n`),
   });
 }

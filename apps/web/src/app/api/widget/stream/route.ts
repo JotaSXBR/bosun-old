@@ -62,9 +62,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         conversationId = event.conversationId as string;
       }
       if (event.conversationId !== conversationId) return;
-      send(`data: ${JSON.stringify({ type: "updated" })}
-
-`);
+      send(`data: ${JSON.stringify({ type: "updated" })}\n\n`);
     },
   });
 }

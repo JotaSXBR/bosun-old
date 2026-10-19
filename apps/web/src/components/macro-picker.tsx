@@ -172,10 +172,9 @@ function ProposalForm({ state }: { state: Proposal }) {
   );
 }
 
-function EmptyMacros(props: Pick<PickerProps, "query" | "canPropose" | "onClose">) {
-  const { query, canPropose, onClose } = props;
+function EmptyMacros(props: Pick<PickerProps, "query" | "canPropose"> & { state: Proposal }) {
+  const { query, canPropose, state } = props;
   const t = useTranslations("composer.macros");
-  const state = useMacroProposal(query, onClose);
   return (
     <div className="p-3 text-sm">
       <p className="text-ink-muted">{t("empty", { query })}</p>
@@ -201,6 +200,8 @@ function EmptyMacros(props: Pick<PickerProps, "query" | "canPropose" | "onClose"
  * empty list offers an inline proposal form.
  */
 export function MacroPicker(props: PickerProps) {
+  // Held here, not in EmptyMacros: the draft survives the list matching again while typing.
+  const proposal = useMacroProposal(props.query, props.onClose);
   return (
     <div
       className="bg-raised shadow-raised absolute bottom-full left-0 z-10 mb-1 w-80 rounded-md border"
@@ -209,7 +210,7 @@ export function MacroPicker(props: PickerProps) {
       {props.matches.length > 0 ? (
         <MacroList {...props} />
       ) : (
-        <EmptyMacros query={props.query} canPropose={props.canPropose} onClose={props.onClose} />
+        <EmptyMacros query={props.query} canPropose={props.canPropose} state={proposal} />
       )}
     </div>
   );
