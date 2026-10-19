@@ -1,4 +1,3 @@
-import { NotFoundError } from "@crm/core";
 import { Badge } from "@crm/design-system/components/badge";
 import { Card } from "@crm/design-system/components/card";
 import { hasPermission } from "@crm/permissions";
@@ -10,8 +9,8 @@ import { ConversationLeadPanel } from "@/components/conversation-lead-panel";
 import { LocalDateTime } from "@/components/local-date-time";
 import { pickProfileMetadata } from "@/lib/contact-profile";
 import { TICKET_STATUS } from "@/lib/ticket-status";
+import { findConversation } from "@/server/find-conversation";
 import {
-  getConversation,
   getConversationDeal,
   getConversationLabels,
   listContactLabels,
@@ -21,6 +20,45 @@ import {
 } from "@/server/services";
 import { requireTenantContext } from "@/server/tenant";
 
+type HistoryRow = Awaited<ReturnType<typeof listContactTickets>>[number];
+
+async function ContactHistoryCard({ history }: { history: HistoryRow[] }) {
+  const t = await getTranslations("inbox");
+  const ts = await getTranslations("ticketStatus");
+  return (
+    <Card bodyClassName="space-y-2 text-sm" title={t("contactHistory")} className="mt-4">
+      {history.length === 0 ? (
+        <p className="text-ink-muted text-xs">{t("contactHistoryEmpty")}</p>
+      ) : (
+        <ul className="space-y-2" data-testid="contact-history">
+          {history.map((ticket) => (
+            <li key={ticket.id}>
+              <Link
+                href={`/app/inbox?c=${ticket.id}`}
+                className="hover:bg-raised/50 -mx-2 flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
+              >
+                <span className="min-w-0">
+                  <span className="text-ink block truncate text-xs font-medium">
+                    #{ticket.ticketNumber} · <LocalDateTime date={ticket.createdAt} />
+                  </span>
+                  {ticket.lastMessagePreview && (
+                    <span className="text-ink-muted block truncate text-xs">
+                      {ticket.lastMessagePreview}
+                    </span>
+                  )}
+                </span>
+                <Badge tone={TICKET_STATUS[ticket.status]?.tone ?? "neutral"} size="sm">
+                  {ts.has(ticket.status) ? ts(ticket.status) : ticket.status}
+                </Badge>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 /**
  * Right column of the inbox workbench — today the lead/deal panel; the full
  * contact ficha (E2, docs/product/inbox.md) drops into this same slot.
@@ -28,17 +66,9 @@ import { requireTenantContext } from "@/server/tenant";
  */
 export async function ConversationAside({ conversationId }: { conversationId: string }) {
   const t = await getTranslations("inbox");
-  const ts = await getTranslations("ticketStatus");
   const ctx = await requireTenantContext();
-  let conversation;
-  try {
-    conversation = await getConversation(ctx, conversationId);
-  } catch (error) {
-    if (error instanceof NotFoundError) {
-      return <p className="text-ink-muted text-sm">{t("notFound")}</p>;
-    }
-    throw error;
-  }
+  const conversation = await findConversation(ctx, conversationId);
+  if (!conversation) return <p className="text-ink-muted text-sm">{t("notFound")}</p>;
   const [deal, funnels, labels, conversationLabels, contactLabels, history] = await Promise.all([
     getConversationDeal(ctx, conversationId),
     listFunnelsWithStages(ctx),
@@ -69,36 +99,7 @@ export async function ConversationAside({ conversationId }: { conversationId: st
         funnels={funnels}
         canWrite={ctx.role !== "viewer"}
       />
-      <Card bodyClassName="space-y-2 text-sm" title={t("contactHistory")} className="mt-4">
-        {history.length === 0 ? (
-          <p className="text-ink-muted text-xs">{t("contactHistoryEmpty")}</p>
-        ) : (
-          <ul className="space-y-2" data-testid="contact-history">
-            {history.map((ticket) => (
-              <li key={ticket.id}>
-                <Link
-                  href={`/app/inbox?c=${ticket.id}`}
-                  className="hover:bg-raised/50 -mx-2 flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
-                >
-                  <span className="min-w-0">
-                    <span className="text-ink block truncate text-xs font-medium">
-                      #{ticket.ticketNumber} · <LocalDateTime date={ticket.createdAt} />
-                    </span>
-                    {ticket.lastMessagePreview && (
-                      <span className="text-ink-muted block truncate text-xs">
-                        {ticket.lastMessagePreview}
-                      </span>
-                    )}
-                  </span>
-                  <Badge tone={TICKET_STATUS[ticket.status]?.tone ?? "neutral"} size="sm">
-                    {ts.has(ticket.status) ? ts(ticket.status) : ticket.status}
-                  </Badge>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+      <ContactHistoryCard history={history} />
     </>
   );
 }

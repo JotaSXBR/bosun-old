@@ -21,8 +21,7 @@ export async function listMacros(
 export async function searchMacros(
   executor: DbExecutor,
   organizationId: string,
-  prefix: string,
-  limit = 10,
+  { prefix, limit = 10 }: { prefix: string; limit?: number },
 ): Promise<MacroRow[]> {
   return executor
     .select()

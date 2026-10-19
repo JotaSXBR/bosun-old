@@ -49,11 +49,13 @@ const agentB = () => ctx(orgB, userB, "agent");
 async function newTicket(channelUserId: string, messageId: string, timestamp: Date) {
   await withTenant(db, orgA, (tx) =>
     ingestChannelEvent(tx, connA, {
-      type: "message.received",
-      externalMessageId: messageId,
-      from: { channelUserId, displayName: "Cliente" },
-      content: { type: "text", text: "qual o prazo de entrega?" },
-      timestamp,
+      event: {
+        type: "message.received",
+        externalMessageId: messageId,
+        from: { channelUserId, displayName: "Cliente" },
+        content: { type: "text", text: "qual o prazo de entrega?" },
+        timestamp,
+      },
     }),
   );
   return withTenant(db, orgA, async (tx) => {
@@ -163,7 +165,10 @@ describe("drafts", () => {
     });
     const provider = new FakeChannelProvider();
 
-    const approved = await approveDraft(db, agentA(), draft.id, { provider });
+    const approved = await approveDraft(db, agentA(), {
+      suggestionId: draft.id,
+      deps: { provider },
+    });
     expect(approved.status).toBe("approved");
     expect(approved.reviewedBy).toBe(userId);
     expect(provider.sentMessages).toHaveLength(1);
@@ -173,7 +178,7 @@ describe("drafts", () => {
     });
 
     // Idempotent re-approve — no second provider call.
-    const again = await approveDraft(db, agentA(), draft.id, { provider });
+    const again = await approveDraft(db, agentA(), { suggestionId: draft.id, deps: { provider } });
     expect(again.status).toBe("approved");
     expect(provider.sentMessages).toHaveLength(1);
 
@@ -193,7 +198,10 @@ describe("drafts", () => {
     expect(rejected.status).toBe("rejected");
 
     await expect(
-      approveDraft(db, agentA(), draft.id, { provider: new FakeChannelProvider() }),
+      approveDraft(db, agentA(), {
+        suggestionId: draft.id,
+        deps: { provider: new FakeChannelProvider() },
+      }),
     ).rejects.toMatchObject({ code: "DRAFT_ALREADY_REVIEWED" });
     expect((await rejectDraft(db, agentA(), draft.id)).status).toBe("rejected");
   });
@@ -209,10 +217,14 @@ describe("drafts", () => {
     await expect(listThreadCards(db, viewerA(), ticket.id)).rejects.toThrowError(
       AuthorizationError,
     );
-    await expect(approveDraft(db, viewerA(), draft.id)).rejects.toThrowError(AuthorizationError);
+    await expect(approveDraft(db, viewerA(), { suggestionId: draft.id })).rejects.toThrowError(
+      AuthorizationError,
+    );
     await expect(rejectDraft(db, viewerA(), draft.id)).rejects.toThrowError(AuthorizationError);
 
-    await expect(approveDraft(db, agentB(), draft.id)).rejects.toThrowError(NotFoundError);
+    await expect(approveDraft(db, agentB(), { suggestionId: draft.id })).rejects.toThrowError(
+      NotFoundError,
+    );
     await expect(rejectDraft(db, agentB(), draft.id)).rejects.toThrowError(NotFoundError);
   });
 
@@ -317,12 +329,10 @@ describe("drafts", () => {
     await withTenant(db, orgA, (tx) =>
       tx.update(conversations).set({ assigneeId: userId }).where(eq(conversations.id, ticket.id)),
     );
-    await sendOutboundMessage(
-      db,
-      agentA(),
-      { conversationId: ticket.id, text: "já respondo" },
-      { provider: new FakeChannelProvider() },
-    );
+    await sendOutboundMessage(db, agentA(), {
+      input: { conversationId: ticket.id, text: "já respondo" },
+      deps: { provider: new FakeChannelProvider() },
+    });
 
     const opts = { idleMinutes: 20, cooldownMinutes: 60 * 24 };
     const candidates = await withTenant(db, orgA, (tx) => listNudgeCandidates(tx, orgA, opts));

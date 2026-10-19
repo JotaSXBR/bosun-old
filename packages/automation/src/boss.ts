@@ -69,6 +69,51 @@ export async function startJobs(env: ServerEnv = getServerEnv()): Promise<PgBoss
   return starting;
 }
 
+type Handler = (payload: unknown) => Promise<unknown>;
+
+const WORKERS: Array<[queue: string, handler: Handler]> = [
+  [QUEUES.processChannelEvent, processChannelEventHandler],
+  [QUEUES.organizationOnboarding, organizationOnboardingHandler],
+  [QUEUES.closeResolvedTickets, closeResolvedTicketsHandler],
+  [QUEUES.channelReconcile, channelReconcileHandler],
+  [QUEUES.observerAnalyze, observerAnalyzeHandler],
+  [QUEUES.brainStaleSweep, brainStaleSweepHandler],
+  [QUEUES.generateDraft, generateDraftHandler],
+  [QUEUES.observerScan, observerScanHandler],
+  [QUEUES.contactAvatar, contactAvatarHandler],
+  [QUEUES.transcribeAudio, transcribeAudioHandler],
+  [QUEUES.contactGoogleSync, contactGoogleSyncHandler],
+  [QUEUES.contactGoogleSweep, contactGoogleSweepHandler],
+];
+
+const SCHEDULES: Array<[queue: string, cron: string]> = [
+  // Resolved tickets past the reopen window.
+  [QUEUES.closeResolvedTickets, "*/15 * * * *"],
+  // Backfill messages WAHA received while the stack was down — the webhook
+  // retry window only covers short outages.
+  [QUEUES.channelReconcile, "*/30 * * * *"],
+  // Mirror contacts the Google account is behind on (orgs that consented only).
+  [QUEUES.contactGoogleSweep, "*/10 * * * *"],
+  // Interval-mode observer sweep — the per-org cadence lives in
+  // organization_settings.observer_interval_minutes; the cron tick is just
+  // the polling granularity.
+  [QUEUES.observerScan, "*/5 * * * *"],
+  // Flag expired canon memory entries for human review once a day.
+  [QUEUES.brainStaleSweep, "15 3 * * *"],
+];
+
+async function registerWorkers(instance: PgBoss): Promise<void> {
+  for (const [queue, handler] of WORKERS) {
+    await instance.work(queue, async (jobs) => {
+      for (const job of jobs) await handler(job.data);
+    });
+  }
+}
+
+async function registerSchedules(instance: PgBoss): Promise<void> {
+  for (const [queue, cron] of SCHEDULES) await instance.schedule(queue, cron);
+}
+
 async function start(env: ServerEnv): Promise<PgBoss> {
   logger.info("pg-boss starting");
   const instance = new PgBoss({
@@ -93,55 +138,8 @@ async function start(env: ServerEnv): Promise<PgBoss> {
       name === QUEUES.contactGoogleSync ? { policy: "key_strict_fifo" } : undefined,
     );
   }
-  await instance.work(QUEUES.processChannelEvent, async (jobs) => {
-    for (const job of jobs) await processChannelEventHandler(job.data);
-  });
-  await instance.work(QUEUES.organizationOnboarding, async (jobs) => {
-    for (const job of jobs) await organizationOnboardingHandler(job.data);
-  });
-  await instance.work(QUEUES.closeResolvedTickets, async (jobs) => {
-    for (const job of jobs) await closeResolvedTicketsHandler(job.data);
-  });
-  // Sweep resolved tickets past the reopen window every 15 minutes.
-  await instance.schedule(QUEUES.closeResolvedTickets, "*/15 * * * *");
-  await instance.work(QUEUES.channelReconcile, async (jobs) => {
-    for (const job of jobs) await channelReconcileHandler(job.data);
-  });
-  // Backfill messages WAHA received while the stack was down — the webhook
-  // retry window only covers short outages.
-  await instance.schedule(QUEUES.channelReconcile, "*/30 * * * *");
-  await instance.work(QUEUES.observerAnalyze, async (jobs) => {
-    for (const job of jobs) await observerAnalyzeHandler(job.data);
-  });
-  await instance.work(QUEUES.brainStaleSweep, async (jobs) => {
-    for (const job of jobs) await brainStaleSweepHandler(job.data);
-  });
-  await instance.work(QUEUES.generateDraft, async (jobs) => {
-    for (const job of jobs) await generateDraftHandler(job.data);
-  });
-  await instance.work(QUEUES.observerScan, async (jobs) => {
-    for (const job of jobs) await observerScanHandler(job.data);
-  });
-  await instance.work(QUEUES.contactAvatar, async (jobs) => {
-    for (const job of jobs) await contactAvatarHandler(job.data);
-  });
-  await instance.work(QUEUES.transcribeAudio, async (jobs) => {
-    for (const job of jobs) await transcribeAudioHandler(job.data);
-  });
-  await instance.work(QUEUES.contactGoogleSync, async (jobs) => {
-    for (const job of jobs) await contactGoogleSyncHandler(job.data);
-  });
-  await instance.work(QUEUES.contactGoogleSweep, async (jobs) => {
-    for (const job of jobs) await contactGoogleSweepHandler(job.data);
-  });
-  // Mirror contacts the Google account is behind on (orgs that consented only).
-  await instance.schedule(QUEUES.contactGoogleSweep, "*/10 * * * *");
-  // Interval-mode observer sweep — the per-org cadence lives in
-  // organization_settings.observer_interval_minutes; the cron tick is just
-  // the polling granularity.
-  await instance.schedule(QUEUES.observerScan, "*/5 * * * *");
-  // Flag expired canon memory entries for human review once a day.
-  await instance.schedule(QUEUES.brainStaleSweep, "15 3 * * *");
+  await registerWorkers(instance);
+  await registerSchedules(instance);
 
   logger.info("pg-boss started", { queues: Object.values(QUEUES) });
   return (boss = instance);

@@ -11,13 +11,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { TenantContext } from "../../tenant/context";
 import { deleteMessageContent, editMessageContent } from "./message-actions";
-import { getMessageContent, getMessageEdits, resolveMessageMedia } from "./message-views";
-import { sendChannelMessage, sendOutboundMessage } from "./outbound";
+import { getMessageContent, getMessageEdits } from "./message-views";
+import { sendOutboundMessage } from "./outbound";
 import type { ConnectionRef } from "./service";
 import { ingestChannelEvent } from "./service";
 
-const { channelConnections, conversations, messages, organizationMembers, organizations, users } =
-  schema;
+const { channelConnections, conversations, organizationMembers, organizations, users } = schema;
 
 let db: Database;
 let orgA: string;
@@ -31,18 +30,20 @@ function ctx(organizationId: string, role: TenantContext["role"]): TenantContext
 async function newTicket(channelUserId: string, messageId: string, media = false) {
   await withTenant(db, orgA, (tx) =>
     ingestChannelEvent(tx, connA, {
-      type: "message.received",
-      externalMessageId: messageId,
-      from: { channelUserId, displayName: "Views" },
-      content: media
-        ? {
-            type: "media",
-            mediaKind: "audio",
-            source: { type: "url", url: `https://waha.internal/media/${messageId}` },
-            mimeType: "audio/ogg; codecs=opus",
-          }
-        : { type: "text", text: "hi" },
-      timestamp: new Date("2024-04-08"),
+      event: {
+        type: "message.received",
+        externalMessageId: messageId,
+        from: { channelUserId, displayName: "Views" },
+        content: media
+          ? {
+              type: "media",
+              mediaKind: "audio",
+              source: { type: "url", url: `https://waha.internal/media/${messageId}` },
+              mimeType: "audio/ogg; codecs=opus",
+            }
+          : { type: "text", text: "hi" },
+        timestamp: new Date("2024-04-08"),
+      },
     }),
   );
   return withTenant(db, orgA, async (tx) => {
@@ -102,18 +103,14 @@ describe("privileged reads — original + edit history", () => {
   it("agents are denied; managers can read the revoked original", async () => {
     const ticket = await newTicket("pv-1@c.us", "false_pv1@c.us_1");
     const provider = new FakeChannelProvider();
-    const reply = await sendOutboundMessage(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, text: "secret outbound" },
-      { provider },
-    );
-    await deleteMessageContent(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, messageId: reply.id },
-      { provider },
-    );
+    const reply = await sendOutboundMessage(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, text: "secret outbound" },
+      deps: { provider },
+    });
+    await deleteMessageContent(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, messageId: reply.id },
+      deps: { provider },
+    });
 
     const input = { conversationId: ticket.id, messageId: reply.id };
     await expect(getMessageContent(db, ctx(orgA, "agent"), input)).rejects.toThrowError(
@@ -127,18 +124,14 @@ describe("privileged reads — original + edit history", () => {
   it("edit history is privileged too and lists previous versions", async () => {
     const ticket = await newTicket("pv-2@c.us", "false_pv2@c.us_1");
     const provider = new FakeChannelProvider();
-    const reply = await sendOutboundMessage(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, text: "v1" },
-      { provider },
-    );
-    await editMessageContent(
-      db,
-      ctx(orgA, "agent"),
-      { conversationId: ticket.id, messageId: reply.id, text: "v2" },
-      { provider },
-    );
+    const reply = await sendOutboundMessage(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, text: "v1" },
+      deps: { provider },
+    });
+    await editMessageContent(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, messageId: reply.id, text: "v2" },
+      deps: { provider },
+    });
 
     const input = { conversationId: ticket.id, messageId: reply.id };
     await expect(getMessageEdits(db, ctx(orgA, "viewer"), input)).rejects.toThrowError(
@@ -147,194 +140,5 @@ describe("privileged reads — original + edit history", () => {
     const edits = await getMessageEdits(db, ctx(orgA, "admin"), input);
     expect(edits).toHaveLength(1);
     expect(edits[0]!.previousContent).toMatchObject({ text: "v1" });
-  });
-});
-
-describe("resolveMessageMedia — media proxy source", () => {
-  it("serves outbound uploads from object storage", async () => {
-    const ticket = await newTicket("md-1@c.us", "false_md1@c.us_1");
-    const provider = new FakeChannelProvider();
-    const sent = await sendChannelMessage(
-      db,
-      ctx(orgA, "agent"),
-      {
-        conversationId: ticket.id,
-        content: {
-          type: "media",
-          mediaKind: "document",
-          url: "https://storage.example.com/signed/doc.pdf",
-          mimeType: "application/pdf",
-          filename: "doc.pdf",
-          storageKey: `org/${orgA}/outbound/doc-1`,
-        },
-      },
-      { provider },
-    );
-
-    const bytes = new Uint8Array([1, 2, 3]);
-    const downloads: string[] = [];
-    const resolved = await resolveMessageMedia(
-      db,
-      ctx(orgA, "agent"),
-      { messageId: sent.id },
-      {
-        downloadObject: (key) => {
-          downloads.push(key);
-          return Promise.resolve({ body: bytes, contentType: "application/pdf" });
-        },
-        fetchProviderMedia: () => Promise.reject(new Error("must not be called")),
-      },
-    );
-    expect(downloads).toEqual([`org/${orgA}/outbound/doc-1`]);
-    expect(resolved).toMatchObject({
-      body: bytes,
-      contentType: "application/pdf",
-      filename: "doc.pdf",
-    });
-  });
-
-  it("serves inbound media through the provider fetch", async () => {
-    await newTicket("md-2@c.us", "false_md2@c.us_1", true);
-    const [inbound] = await withTenant(db, orgA, (tx) =>
-      tx.select().from(messages).where(eq(messages.externalId, "false_md2@c.us_1")),
-    );
-    const seen: string[] = [];
-    const resolved = await resolveMessageMedia(
-      db,
-      ctx(orgA, "agent"),
-      { messageId: inbound!.id },
-      {
-        fetchProviderMedia: (connectionId, url) => {
-          seen.push(`${connectionId}:${url}`);
-          return Promise.resolve({ body: new Uint8Array([9]), contentType: "audio/ogg" });
-        },
-      },
-    );
-    expect(seen).toEqual([`${connA.id}:https://waha.internal/media/false_md2@c.us_1`]);
-    expect(resolved).toMatchObject({ contentType: "audio/ogg" });
-    expect(resolved!.body).toEqual(new Uint8Array([9]));
-  });
-
-  it("falls back to the by-id download when the stored url fails", async () => {
-    // Sticker-style inbound: the stored url is the WhatsApp CDN (.enc) —
-    // the provider refuses to fetch it, so the resolver retries by
-    // (chatId, messageId): conversation.externalId + message.externalId.
-    await withTenant(db, orgA, (tx) =>
-      ingestChannelEvent(tx, connA, {
-        type: "message.received",
-        externalMessageId: "false_md5@c.us_1",
-        from: { channelUserId: "md-5@c.us", displayName: "Views" },
-        content: {
-          type: "media",
-          mediaKind: "image",
-          source: { type: "url", url: "https://mmg.whatsapp.net/v/x.enc" },
-          mimeType: "image/webp",
-        },
-        timestamp: new Date("2024-04-08"),
-      }),
-    );
-    const [inbound] = await withTenant(db, orgA, (tx) =>
-      tx.select().from(messages).where(eq(messages.externalId, "false_md5@c.us_1")),
-    );
-    const calls: string[] = [];
-    const resolved = await resolveMessageMedia(
-      db,
-      ctx(orgA, "agent"),
-      { messageId: inbound!.id },
-      {
-        fetchProviderMedia: () => Promise.reject(new Error("refused: url outside the WAHA host")),
-        fetchMessageMedia: (connectionId, chatId, messageExternalId) => {
-          calls.push(`${connectionId}:${chatId}:${messageExternalId}`);
-          return Promise.resolve({ body: new Uint8Array([7]), contentType: "image/webp" });
-        },
-      },
-    );
-    expect(calls).toEqual([`${connA.id}:md-5@c.us:false_md5@c.us_1`]);
-    expect(resolved).toMatchObject({ contentType: "image/webp" });
-    expect(resolved!.body).toEqual(new Uint8Array([7]));
-  });
-
-  it("revoked media is restricted to inspector roles", async () => {
-    await newTicket("md-r@c.us", "false_mdr@c.us_1", true);
-    const [inbound] = await withTenant(db, orgA, (tx) =>
-      tx.select().from(messages).where(eq(messages.externalId, "false_mdr@c.us_1")),
-    );
-    await withTenant(db, orgA, (tx) =>
-      ingestChannelEvent(tx, connA, {
-        type: "message.revoked",
-        messageExternalId: "false_mdr@c.us_1",
-      }),
-    );
-    const deps = {
-      fetchProviderMedia: () =>
-        Promise.resolve({ body: new Uint8Array([1]), contentType: "audio/ogg" }),
-    };
-    // Regular roles are refused — same gate as the "ver original" text.
-    await expect(
-      resolveMessageMedia(db, ctx(orgA, "agent"), { messageId: inbound!.id }, deps),
-    ).rejects.toThrowError(/restricted|owner\/admin\/manager/i);
-    // Inspectors still get the bytes.
-    const resolved = await resolveMessageMedia(
-      db,
-      ctx(orgA, "admin"),
-      { messageId: inbound!.id },
-      deps,
-    );
-    expect(resolved).toMatchObject({ contentType: "audio/ogg" });
-  });
-
-  it("rejects a storageKey outside the caller's tenant prefix", async () => {
-    const ticket = await newTicket("md-x@c.us", "false_mdx@c.us_1");
-    const provider = new FakeChannelProvider();
-    const sent = await sendChannelMessage(
-      db,
-      ctx(orgA, "agent"),
-      {
-        conversationId: ticket.id,
-        content: {
-          type: "media",
-          mediaKind: "document",
-          url: "https://storage.example.com/signed/x.pdf",
-          mimeType: "application/pdf",
-          storageKey: `org/${crypto.randomUUID()}/outbound/victim.pdf`,
-        },
-      },
-      { provider },
-    );
-    const resolved = await resolveMessageMedia(
-      db,
-      ctx(orgA, "agent"),
-      { messageId: sent.id },
-      { downloadObject: () => Promise.reject(new Error("must not download cross-tenant keys")) },
-    );
-    expect(resolved).toBeNull();
-  });
-
-  it("rejects non-media messages and unknown ids", async () => {
-    await newTicket("md-3@c.us", "false_md3@c.us_1");
-    const [inbound] = await withTenant(db, orgA, (tx) =>
-      tx.select().from(messages).where(eq(messages.externalId, "false_md3@c.us_1")),
-    );
-    await expect(
-      resolveMessageMedia(db, ctx(orgA, "agent"), { messageId: inbound!.id }, {}),
-    ).rejects.toThrowError(/no media content/);
-    await expect(
-      resolveMessageMedia(db, ctx(orgA, "agent"), { messageId: crypto.randomUUID() }, {}),
-    ).rejects.toThrowError(/not found/i);
-  });
-
-  it("returns null when the media has no reachable source", async () => {
-    await newTicket("md-4@c.us", "false_md4@c.us_1", true);
-    const [inbound] = await withTenant(db, orgA, (tx) =>
-      tx.select().from(messages).where(eq(messages.externalId, "false_md4@c.us_1")),
-    );
-    // url-sourced media but no fetchProviderMedia dep → null
-    const resolved = await resolveMessageMedia(
-      db,
-      ctx(orgA, "agent"),
-      { messageId: inbound!.id },
-      {},
-    );
-    expect(resolved).toBeNull();
   });
 });

@@ -272,7 +272,7 @@ export async function searchOrgContacts(
   ctx: TenantContext,
   query?: string,
 ): Promise<ContactPickRow[]> {
-  return searchContacts(getDb(), ctx, query);
+  return searchContacts(getDb(), ctx, { query });
 }
 
 export type { ContactListRow };

@@ -75,6 +75,82 @@ async function prepare(db: Database, payload: TranscribeAudioPayload): Promise<P
   });
 }
 
+type TranscribeContext = {
+  db: Database;
+  payload: TranscribeAudioPayload;
+  prepared: Prepared;
+  deps: TranscribeAudioDeps | undefined;
+};
+
+const logUsageFailure = (error: unknown) =>
+  logger.warn("stt usage record failed", { error: String(error) });
+
+function usageRecorder({ db, payload, prepared }: TranscribeContext) {
+  const startedAt = Date.now();
+  const { credential } = prepared;
+  return (status: "ok" | "error") =>
+    withTenant(db, payload.organizationId, (tx) =>
+      recordUsageEvents(tx, payload.organizationId, [
+        {
+          credentialId: credential.id,
+          callKind: "stt",
+          provider: credential.provider,
+          model: credential.model,
+          tokensIn: 0,
+          tokensOut: 0,
+          latencyMs: Date.now() - startedAt,
+          status,
+        },
+      ]),
+    );
+}
+
+/** Fetches the audio, transcribes it and stores the transcript; `skipped` when the provider can't fetch media. */
+async function transcribeAndStore(ctx: TranscribeContext): Promise<{ ok: true; skipped?: true }> {
+  const { db, payload, prepared, deps } = ctx;
+  const provider =
+    deps?.provider ??
+    (await providerForConnection(db, payload.organizationId, payload.channelConnectionId));
+  if (!provider.fetchMedia) return { ok: true, skipped: true };
+  const media = await provider.fetchMedia(prepared.mediaUrl);
+  const { credential } = prepared;
+  const { text } = await (deps?.transcribe ?? transcribeAudio)(
+    { audio: media.body, mimeType: media.contentType ?? prepared.mimeType },
+    { provider: credential.provider, apiKey: credential.apiKey },
+  );
+  await withTenant(db, payload.organizationId, async (tx) => {
+    await mergeMessageMetadata(tx, payload.messageId, {
+      transcript: text,
+      transcriptProvider: credential.provider,
+    });
+    await emitDomainEvent(tx, {
+      type: "message.updated",
+      organizationId: payload.organizationId,
+      conversationId: prepared.conversationId,
+      messageId: payload.messageId,
+    });
+  });
+  return { ok: true };
+}
+
+/** Never throws: a failure is recorded as a usage event and logged. */
+async function transcribeSafely(ctx: TranscribeContext): Promise<{ ok: boolean; skipped?: true }> {
+  const record = usageRecorder(ctx);
+  try {
+    const result = await transcribeAndStore(ctx);
+    if (!result.skipped) await record("ok").catch(logUsageFailure);
+    return result;
+  } catch (error) {
+    await record("error").catch(logUsageFailure);
+    logger.warn("audio transcription failed", {
+      organizationId: ctx.payload.organizationId,
+      messageId: ctx.payload.messageId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { ok: false };
+  }
+}
+
 /**
  * Transcribes an inbound audio message: provider fetchMedia → BYOK STT →
  * `metadata.transcript` + a message.updated event so the open thread
@@ -91,59 +167,5 @@ export async function transcribeAudioHandler(
   const prepared = await prepare(db, parsed);
   if (!prepared) return { ok: true, skipped: true };
 
-  const { credential } = prepared;
-  const startedAt = Date.now();
-  const record = (status: "ok" | "error") =>
-    withTenant(db, parsed.organizationId, (tx) =>
-      recordUsageEvents(tx, parsed.organizationId, [
-        {
-          credentialId: credential.id,
-          callKind: "stt",
-          provider: credential.provider,
-          model: credential.model,
-          tokensIn: 0,
-          tokensOut: 0,
-          latencyMs: Date.now() - startedAt,
-          status,
-        },
-      ]),
-    );
-
-  try {
-    const provider =
-      deps?.provider ??
-      (await providerForConnection(db, parsed.organizationId, parsed.channelConnectionId));
-    if (!provider.fetchMedia) return { ok: true, skipped: true };
-    const media = await provider.fetchMedia(prepared.mediaUrl);
-    const { text } = await (deps?.transcribe ?? transcribeAudio)(
-      { audio: media.body, mimeType: media.contentType ?? prepared.mimeType },
-      { provider: credential.provider, apiKey: credential.apiKey },
-    );
-    await withTenant(db, parsed.organizationId, async (tx) => {
-      await mergeMessageMetadata(tx, parsed.messageId, {
-        transcript: text,
-        transcriptProvider: credential.provider,
-      });
-      await emitDomainEvent(tx, {
-        type: "message.updated",
-        organizationId: parsed.organizationId,
-        conversationId: prepared.conversationId,
-        messageId: parsed.messageId,
-      });
-    });
-    await record("ok").catch((error: unknown) =>
-      logger.warn("stt usage record failed", { error: String(error) }),
-    );
-    return { ok: true };
-  } catch (error) {
-    await record("error").catch((usageError: unknown) =>
-      logger.warn("stt usage record failed", { error: String(usageError) }),
-    );
-    logger.warn("audio transcription failed", {
-      organizationId: parsed.organizationId,
-      messageId: parsed.messageId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return { ok: false };
-  }
+  return transcribeSafely({ db, payload: parsed, prepared, deps });
 }

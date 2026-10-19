@@ -4,22 +4,11 @@ import type { ConversationDetailRow } from "@crm/core/messaging";
 import type { OrgMember } from "@crm/core/organizations";
 import type { TeamWithMembers } from "@crm/core/teams";
 import { Button } from "@crm/design-system/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@crm/design-system/components/dropdown-menu";
-import { toast } from "@crm/design-system/components/toast";
-import { useRouter } from "next/navigation";
-import { useFormatter, useTranslations } from "next-intl";
-import { useEffect, useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
+import { useEffect } from "react";
 
+import { MoreActions, snoozeTarget, type T } from "@/components/ticket-more-actions";
+import { type RunAction, useRunAction } from "@/lib/use-run-action";
 import {
   pickupConversationAction,
   reopenTicketAction,
@@ -28,11 +17,7 @@ import {
   setConversationInProgressAction,
   setConversationWaitingAction,
   snoozeConversationAction,
-  transferConversationAction,
 } from "@/server/actions/messaging";
-
-type ActionResult = { ok: true } | { ok: false; error: string };
-type T = ReturnType<typeof useTranslations>;
 
 /** Which shortcut keys currently do something — mirrors the visible buttons. */
 function actionAvailability(args: {
@@ -54,7 +39,7 @@ function useTicketShortcuts(args: {
   pickup: boolean;
   resolve: boolean;
   snooze: boolean;
-  run: (action: Promise<ActionResult>) => void;
+  run: RunAction;
 }) {
   const { conversationId, pickup, resolve, snooze, run } = args;
   useEffect(() => {
@@ -74,16 +59,7 @@ function useTicketShortcuts(args: {
   });
 }
 
-export function TicketActions({
-  conversation,
-  userId,
-  members,
-  sectors,
-  canWork,
-  isResolved,
-  isClosed,
-  isViewer,
-}: {
+type TicketActionsProps = {
   conversation: ConversationDetailRow;
   userId: string;
   members: OrgMember[];
@@ -92,85 +68,99 @@ export function TicketActions({
   isResolved: boolean;
   isClosed: boolean;
   isViewer: boolean;
-}) {
-  const t = useTranslations("tickets");
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+};
 
+/** Shortcut hint line under the buttons — only the keys that currently do something. */
+function ShortcutHints({
+  keys,
+  t,
+}: {
+  keys: { pickup: boolean; resolve: boolean; snooze: boolean };
+  t: T;
+}) {
+  if (!keys.pickup && !keys.resolve && !keys.snooze) return null;
+  return (
+    <p className="text-ink-subtle mt-2 text-xs" data-testid="action-shortcuts">
+      {[
+        keys.pickup && t("shortcutPickup"),
+        keys.resolve && t("shortcutResolve"),
+        keys.snooze && t("shortcutSnooze"),
+      ]
+        .filter(Boolean)
+        .join(" · ")}
+    </p>
+  );
+}
+
+/** Reopen / new-service buttons for finished tickets. */
+function RestartButtons(props: {
+  conversationId: string;
+  isResolved: boolean;
+  isClosed: boolean;
+  pending: boolean;
+  run: RunAction;
+  t: T;
+}) {
+  const { conversationId, isResolved, isClosed, pending, run, t } = props;
+  return (
+    <>
+      {isResolved && (
+        <Button
+          variant="primary"
+          disabled={pending}
+          onClick={() => run(reopenTicketAction({ conversationId }))}
+        >
+          {t("reopen")}
+        </Button>
+      )}
+      {isClosed && (
+        <Button
+          variant="primary"
+          disabled={pending}
+          onClick={() => run(resumeTicketAction({ conversationId }))}
+        >
+          {t("newService")}
+        </Button>
+      )}
+    </>
+  );
+}
+
+export function TicketActions(props: TicketActionsProps) {
+  const { conversation, userId, members, sectors, canWork, isResolved, isClosed } = props;
+  const t = useTranslations("tickets");
+  const { pending, run } = useRunAction();
   // Work actions belong to the assignee; another agent's path is Transfer.
   const ownsTicket = conversation.assigneeId === null || conversation.assigneeId === userId;
-  // Viewers can never work a ticket — no point offering them as targets.
-  const agents = members.filter((m) => m.role !== "viewer");
+  const keys = actionAvailability({ conversation, ownsTicket, canWork, isResolved, isClosed });
+  useTicketShortcuts({ conversationId: conversation.id, ...keys, run });
 
-  const run = (action: Promise<ActionResult>) =>
-    startTransition(async () => {
-      const result = await action;
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      router.refresh();
-    });
-
-  const conversationId = conversation.id;
-  const {
-    pickup: canPickup,
-    resolve: canResolve,
-    snooze: canSnooze,
-  } = actionAvailability({
-    conversation,
-    ownsTicket,
-    canWork,
-    isResolved,
-    isClosed,
-  });
-  useTicketShortcuts({
-    conversationId,
-    pickup: canPickup,
-    resolve: canResolve,
-    snooze: canSnooze,
-    run,
-  });
-
-  if (isViewer) return null;
+  if (props.isViewer) return null;
 
   return (
     <div className="border-t pt-4" data-testid="ticket-actions">
       <div className="flex flex-wrap items-center gap-2">
-        {isResolved && (
-          <Button
-            variant="primary"
-            disabled={pending}
-            onClick={() => run(reopenTicketAction({ conversationId }))}
-          >
-            {t("reopen")}
-          </Button>
-        )}
-
-        {isClosed && (
-          <Button
-            variant="primary"
-            disabled={pending}
-            onClick={() => run(resumeTicketAction({ conversationId }))}
-          >
-            {t("newService")}
-          </Button>
-        )}
-
+        <RestartButtons
+          conversationId={conversation.id}
+          isResolved={isResolved}
+          isClosed={isClosed}
+          pending={pending}
+          run={run}
+          t={t}
+        />
         {canWork && !ownsTicket && (
           <span className="text-ink-muted text-sm">
             {t("inServiceBy", { name: conversation.assigneeName ?? "?" })}
           </span>
         )}
-
         {canWork && ownsTicket && !isResolved && !isClosed && (
           <WorkActions conversation={conversation} pending={pending} run={run} t={t} />
         )}
-
         {canWork && (
           <MoreActions
             conversation={conversation}
-            agents={agents}
+            // Viewers can never work a ticket — no point offering them as targets.
+            agents={members.filter((m) => m.role !== "viewer")}
             sectors={sectors}
             pending={pending}
             run={run}
@@ -178,19 +168,47 @@ export function TicketActions({
           />
         )}
       </div>
-      {(canPickup || canResolve || canSnooze) && (
-        <p className="text-ink-subtle mt-2 text-xs" data-testid="action-shortcuts">
-          {[
-            canPickup && t("shortcutPickup"),
-            canResolve && t("shortcutResolve"),
-            canSnooze && t("shortcutSnooze"),
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </p>
-      )}
+      <ShortcutHints keys={keys} t={t} />
     </div>
   );
+}
+
+/** Uniform secondary status toggle: in progress ⇄ waiting for the customer. */
+function StatusToggle({
+  conversation,
+  pending,
+  run,
+  t,
+}: {
+  conversation: ConversationDetailRow;
+  pending: boolean;
+  run: RunAction;
+  t: T;
+}) {
+  const conversationId = conversation.id;
+  if (conversation.status === "in_progress") {
+    return (
+      <Button
+        variant="secondary"
+        disabled={pending}
+        onClick={() => run(setConversationWaitingAction({ conversationId }))}
+      >
+        {t("waiting")}
+      </Button>
+    );
+  }
+  if (conversation.status === "waiting_customer") {
+    return (
+      <Button
+        variant="secondary"
+        disabled={pending}
+        onClick={() => run(setConversationInProgressAction({ conversationId }))}
+      >
+        {t("inProgress")}
+      </Button>
+    );
+  }
+  return null;
 }
 
 /** Primary contextual action + uniform secondary status toggle. */
@@ -202,7 +220,7 @@ function WorkActions({
 }: {
   conversation: ConversationDetailRow;
   pending: boolean;
-  run: (action: Promise<ActionResult>) => void;
+  run: RunAction;
   t: T;
 }) {
   const conversationId = conversation.id;
@@ -226,139 +244,7 @@ function WorkActions({
           {t("resolve")}
         </Button>
       )}
-      {conversation.status === "in_progress" && (
-        <Button
-          variant="secondary"
-          disabled={pending}
-          onClick={() => run(setConversationWaitingAction({ conversationId }))}
-        >
-          {t("waiting")}
-        </Button>
-      )}
-      {conversation.status === "waiting_customer" && (
-        <Button
-          variant="secondary"
-          disabled={pending}
-          onClick={() => run(setConversationInProgressAction({ conversationId }))}
-        >
-          {t("inProgress")}
-        </Button>
-      )}
-    </>
-  );
-}
-
-const SNOOZE_PRESET_KEY = {
-  "1h": "snooze1h",
-  tomorrow: "snoozeTomorrow",
-  week: "snoozeWeek",
-} as const;
-
-function snoozeTarget(preset: keyof typeof SNOOZE_PRESET_KEY): Date {
-  const now = new Date();
-  if (preset === "1h") return new Date(now.getTime() + 3_600_000);
-  if (preset === "tomorrow") {
-    const d = new Date(now);
-    d.setDate(d.getDate() + 1);
-    d.setHours(9, 0, 0, 0);
-    return d;
-  }
-  return new Date(now.getTime() + 7 * 86_400_000);
-}
-
-/** Less-frequent actions live under one ghost trigger — never competes with
- * the primary. */
-function MoreActions({
-  conversation,
-  agents,
-  sectors,
-  pending,
-  run,
-  t,
-}: {
-  conversation: ConversationDetailRow;
-  agents: OrgMember[];
-  sectors: TeamWithMembers[];
-  pending: boolean;
-  run: (action: Promise<ActionResult>) => void;
-  t: T;
-}) {
-  const format = useFormatter();
-  const [mountedAt] = useState(() => Date.now());
-  const conversationId = conversation.id;
-  const snoozedUntil = conversation.snoozedUntil ? new Date(conversation.snoozedUntil) : null;
-  const snoozed = snoozedUntil !== null && snoozedUntil.getTime() > mountedAt;
-
-  const transfer = (target: string) => {
-    const [kind, id] = target.split(":");
-    run(
-      transferConversationAction(
-        kind === "user" ? { conversationId, assigneeId: id! } : { conversationId, sectorId: id! },
-      ),
-    );
-  };
-
-  return (
-    <>
-      {snoozed && (
-        <span className="text-ink-muted text-sm">
-          {t("snoozedUntil", {
-            date: format.dateTime(snoozedUntil, { dateStyle: "short", timeStyle: "short" }),
-          })}
-        </span>
-      )}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" iconRight="chevron-down" disabled={pending}>
-            {t("moreActions")}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {snoozed && (
-            <>
-              <DropdownMenuItem
-                onSelect={() => run(snoozeConversationAction({ conversationId, until: null }))}
-              >
-                {t("resume")}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          )}
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>{t("snooze")}</DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              {(Object.keys(SNOOZE_PRESET_KEY) as (keyof typeof SNOOZE_PRESET_KEY)[]).map((p) => (
-                <DropdownMenuItem
-                  key={p}
-                  onSelect={() =>
-                    run(snoozeConversationAction({ conversationId, until: snoozeTarget(p) }))
-                  }
-                >
-                  {t(SNOOZE_PRESET_KEY[p])}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-          <DropdownMenuSeparator />
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>{t("transferTo")}</DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuLabel>{t("agents")}</DropdownMenuLabel>
-              {agents.map((m) => (
-                <DropdownMenuItem key={m.userId} onSelect={() => transfer(`user:${m.userId}`)}>
-                  {m.name}
-                </DropdownMenuItem>
-              ))}
-              <DropdownMenuLabel>{t("sectors")}</DropdownMenuLabel>
-              {sectors.map((s) => (
-                <DropdownMenuItem key={s.id} onSelect={() => transfer(`sector:${s.id}`)}>
-                  {s.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <StatusToggle conversation={conversation} pending={pending} run={run} t={t} />
     </>
   );
 }

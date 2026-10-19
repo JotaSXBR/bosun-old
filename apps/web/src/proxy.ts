@@ -6,10 +6,7 @@ import { NextResponse } from "next/server";
 // gets the nonce + CSP without an auth gate.
 const PROTECTED_PATHS = ["/app", "/onboarding"];
 
-export function proxy(request: NextRequest) {
-  // Fresh nonce per request: Next.js parses it back out of the forwarded
-  // request CSP header at render time and stamps it on its own script tags.
-  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+function contentSecurityPolicy(nonce: string): string {
   const isDev = process.env.NODE_ENV === "development";
 
   // style-src keeps 'unsafe-inline' instead of the docs' nonce-based styles:
@@ -31,14 +28,10 @@ export function proxy(request: NextRequest) {
     ${isDev ? "" : "upgrade-insecure-requests;"}
   `;
   // Replace newline characters and spaces
-  const contentSecurityPolicyHeaderValue = cspHeader.replace(/\s{2,}/g, " ").trim();
+  return cspHeader.replace(/\s{2,}/g, " ").trim();
+}
 
-  // Forwarded on the request so SSR sees the nonce; x-nonce keeps it reachable
-  // via headers() for any future custom <Script>.
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-nonce", nonce);
-  requestHeaders.set("Content-Security-Policy", contentSecurityPolicyHeaderValue);
-
+function routeResponse(request: NextRequest, requestHeaders: Headers): NextResponse {
   const { pathname } = request.nextUrl;
   const isProtected = PROTECTED_PATHS.some(
     (path) => pathname === path || pathname.startsWith(`${path}/`),
@@ -46,14 +39,27 @@ export function proxy(request: NextRequest) {
 
   // Optimistic redirect only — the session cookie may be stale or invalid, so
   // every protected route still verifies the session server-side.
-  let response: NextResponse;
   if (isProtected && !getSessionCookie(request)) {
     const url = request.nextUrl.clone();
     url.pathname = "/sign-in";
-    response = NextResponse.redirect(url);
-  } else {
-    response = NextResponse.next({ request: { headers: requestHeaders } });
+    return NextResponse.redirect(url);
   }
+  return NextResponse.next({ request: { headers: requestHeaders } });
+}
+
+export function proxy(request: NextRequest) {
+  // Fresh nonce per request: Next.js parses it back out of the forwarded
+  // request CSP header at render time and stamps it on its own script tags.
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  const contentSecurityPolicyHeaderValue = contentSecurityPolicy(nonce);
+
+  // Forwarded on the request so SSR sees the nonce; x-nonce keeps it reachable
+  // via headers() for any future custom <Script>.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", contentSecurityPolicyHeaderValue);
+
+  const response = routeResponse(request, requestHeaders);
   response.headers.set("Content-Security-Policy", contentSecurityPolicyHeaderValue);
   return response;
 }

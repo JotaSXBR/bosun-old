@@ -159,6 +159,69 @@ export type MediaResolverDeps = {
   ) => Promise<ResolvedMediaBody | null>;
 };
 
+type MediaContent = Extract<MessageContent, { type: "media" }>;
+
+const withFallbackMeta = (media: ResolvedMediaBody, content: MediaContent): ResolvedMediaBody => ({
+  body: media.body,
+  contentType: media.contentType ?? content.mimeType,
+  filename: content.filename,
+});
+
+/** Provider failures resolve to null so the proxy answers 404, not 500; only the message is logged. */
+async function attemptFetch(
+  { label, messageId }: { label: string; messageId: string },
+  fetchMedia: () => Promise<ResolvedMediaBody | null>,
+): Promise<ResolvedMediaBody | null> {
+  try {
+    return await fetchMedia();
+  } catch (error) {
+    logger.warn(label, { messageId, error: errMessage(error) });
+    return null;
+  }
+}
+
+/**
+ * Stored url first (provider-hosted /api/files/* paths). When that fetch is
+ * refused or dead, fall back to the provider's by-id download — sticker
+ * payloads carry WhatsApp CDN .enc urls that aren't fetchable. Each stage
+ * logs its own error (message only — never the url, which can carry signed
+ * CDN params) or "media unavailable" stays invisible.
+ */
+async function fetchRemoteMedia(
+  url: string,
+  source: {
+    messageId: string;
+    channelConnectionId: string;
+    externalId: string | null;
+    conversationExternalId: string | null;
+  },
+  deps: MediaResolverDeps,
+): Promise<ResolvedMediaBody | null> {
+  const { messageId, channelConnectionId, externalId, conversationExternalId } = source;
+  const { fetchProviderMedia, fetchMessageMedia } = deps;
+  const byUrl = fetchProviderMedia
+    ? await attemptFetch({ label: "media url fetch failed", messageId }, () =>
+        fetchProviderMedia(channelConnectionId, url),
+      )
+    : null;
+  if (byUrl) return byUrl;
+  if (!fetchMessageMedia || !externalId || !conversationExternalId) return null;
+  return attemptFetch({ label: "media by-id download failed", messageId }, () =>
+    fetchMessageMedia(channelConnectionId, conversationExternalId, externalId),
+  );
+}
+
+/** Outbound uploads: only tenant-owned keys are servable — the field is client-writable input on send, so the prefix is re-checked before any download. */
+async function downloadTenantObject(
+  organizationId: string,
+  content: MediaContent,
+  deps: MediaResolverDeps,
+): Promise<ResolvedMediaBody | null> {
+  const { storageKey } = content;
+  if (!storageKey?.startsWith(`org/${organizationId}/`) || !deps.downloadObject) return null;
+  return withFallbackMeta(await deps.downloadObject(storageKey), content);
+}
+
 /**
  * Downloads the bytes behind a media message: outbound uploads come from
  * object storage (tenant key), inbound media through the channel provider.
@@ -167,64 +230,21 @@ export type MediaResolverDeps = {
 export async function resolveMessageMedia(
   db: Database,
   ctx: TenantContext,
-  input: { messageId: string },
-  deps: MediaResolverDeps,
+  { input, deps }: { input: { messageId: string }; deps: MediaResolverDeps },
 ): Promise<ResolvedMediaBody | null> {
-  const { content, channelConnectionId, externalId, conversationExternalId } =
-    await getMessageMedia(db, ctx, input);
+  const row = await getMessageMedia(db, ctx, input);
+  const { content } = row;
   if (content.type !== "media") return null;
-  if (content.storageKey) {
-    // Only tenant-owned keys are servable — the field is client-writable
-    // input on send, so re-check the prefix before any download.
-    if (!content.storageKey.startsWith(`org/${ctx.organizationId}/`) || !deps.downloadObject) {
-      return null;
-    }
-    const object = await deps.downloadObject(content.storageKey);
-    return {
-      body: object.body,
-      contentType: object.contentType ?? content.mimeType,
-      filename: content.filename,
-    };
-  }
-  if (content.source.type !== "url" || !content.source.url) {
-    return null;
-  }
-  // Stored url first (provider-hosted /api/files/* paths). When that fetch
-  // is refused or dead, fall back to the provider's by-id download —
-  // sticker payloads carry WhatsApp CDN .enc urls that aren't fetchable.
-  // Provider failures resolve to null so the proxy answers 404, not 500.
-  // Each stage logs its own error (message only — never the url, which can
-  // carry signed CDN params) or "media unavailable" stays invisible.
-  let media: ResolvedMediaBody | null = null;
-  if (deps.fetchProviderMedia) {
-    try {
-      media = await deps.fetchProviderMedia(channelConnectionId, content.source.url);
-    } catch (error) {
-      logger.warn("media url fetch failed", {
-        messageId: input.messageId,
-        error: errMessage(error),
-      });
-      media = null;
-    }
-  }
-  if (!media && deps.fetchMessageMedia && externalId && conversationExternalId) {
-    try {
-      media = await deps.fetchMessageMedia(channelConnectionId, conversationExternalId, externalId);
-    } catch (error) {
-      logger.warn("media by-id download failed", {
-        messageId: input.messageId,
-        error: errMessage(error),
-      });
-      media = null;
-    }
-  }
+  if (content.storageKey) return downloadTenantObject(ctx.organizationId, content, deps);
+  if (content.source.type !== "url" || !content.source.url) return null;
+  const media = await fetchRemoteMedia(
+    content.source.url,
+    { ...row, messageId: input.messageId },
+    deps,
+  );
   if (!media) {
     logger.warn("media unresolved", { messageId: input.messageId });
     return null;
   }
-  return {
-    body: media.body,
-    contentType: media.contentType ?? content.mimeType,
-    filename: content.filename,
-  };
+  return withFallbackMeta(media, content);
 }

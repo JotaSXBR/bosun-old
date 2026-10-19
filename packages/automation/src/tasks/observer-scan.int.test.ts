@@ -45,11 +45,13 @@ const longAgo = new Date(Date.now() - 60 * 60 * 1000);
 async function idleTicket(chatId: string, messageId: string, assign = true) {
   await withTenant(db, orgA, (tx) =>
     ingestChannelEvent(tx, connA, {
-      type: "message.received",
-      externalMessageId: messageId,
-      from: { channelUserId: chatId, displayName: "Cliente" },
-      content: { type: "text", text: "alguém pode me ajudar?" },
-      timestamp: longAgo,
+      event: {
+        type: "message.received",
+        externalMessageId: messageId,
+        from: { channelUserId: chatId, displayName: "Cliente" },
+        content: { type: "text", text: "alguém pode me ajudar?" },
+        timestamp: longAgo,
+      },
     }),
   );
   return withTenant(db, orgA, async (tx) => {

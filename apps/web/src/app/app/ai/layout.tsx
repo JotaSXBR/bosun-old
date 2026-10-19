@@ -23,10 +23,63 @@ const OBSERVER_MODE_KEYS = {
   realtime: "modeRealtime",
 } as const;
 
-export default async function AiModuleLayout({ children }: { children: ReactNode }) {
+const observerModeKey = (mode: string): string =>
+  (OBSERVER_MODE_KEYS as Record<string, string | undefined>)[mode] ?? "modeOff";
+
+type Settings = Awaited<ReturnType<typeof getOrgSettings>>;
+type Credential = Awaited<ReturnType<typeof listOrgLlmCredentials>>[number];
+
+async function AiSummary({
+  settings,
+  credential,
+  counts,
+}: {
+  settings: Settings;
+  credential: Credential | undefined;
+  counts: { reviews: number; stale: number };
+}) {
   const t = await getTranslations("ai");
   const to = await getTranslations("settings.ai.observer");
   const format = await getFormatter();
+  if (!credential) {
+    return (
+      <p className="text-ink-muted">
+        {t("resumo.noKey")}{" "}
+        <Link href="/app/settings/ai/credentials" className="text-ink underline">
+          {t("resumo.noKeyLink")}
+        </Link>
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-x-6 gap-y-1">
+      <span>
+        <span className="text-ink-muted">{t("resumo.credential")} </span>
+        {credential.label ?? credential.provider}
+      </span>
+      <span>
+        <span className="text-ink-muted">{t("resumo.observerMode")} </span>
+        {to(observerModeKey(settings.aiObserverMode))}
+      </span>
+      <span>
+        <span className="text-ink-muted">{t("resumo.lastAnalysis")} </span>
+        {settings.observerLastScanAt
+          ? format.dateTime(settings.observerLastScanAt, {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })
+          : "—"}
+      </span>
+      <span>
+        <span className="text-ink-muted">{t("resumo.pending")} </span>
+        {t("resumo.pendingCounts", { reviews: counts.reviews, stale: counts.stale })}
+      </span>
+    </div>
+  );
+}
+
+export default async function AiModuleLayout({ children }: { children: ReactNode }) {
+  const t = await getTranslations("ai");
   const ctx = await requireTenantContext();
   if (!hasPermission(ctx.role, { ai: ["read"] })) notFound();
 
@@ -36,47 +89,17 @@ export default async function AiModuleLayout({ children }: { children: ReactNode
     listOrgSuggestions(ctx),
     listOrgStaleBrainEntries(ctx),
   ]);
-  const pending = suggestions.filter((s) => s.status === "pending").length;
-  const credential = credentials[0];
-  const modeKey =
-    OBSERVER_MODE_KEYS[settings.aiObserverMode as keyof typeof OBSERVER_MODE_KEYS] ?? "modeOff";
+  const reviews = suggestions.filter((s) => s.status === "pending").length;
 
   return (
     <main className="p-page-pad mx-auto max-w-3xl space-y-6">
       <PageHeader title={t("title")} />
       <Card className="text-sm">
-        {credential ? (
-          <div className="flex flex-wrap gap-x-6 gap-y-1">
-            <span>
-              <span className="text-ink-muted">{t("resumo.credential")} </span>
-              {credential.label ?? credential.provider}
-            </span>
-            <span>
-              <span className="text-ink-muted">{t("resumo.observerMode")} </span>
-              {to(modeKey)}
-            </span>
-            <span>
-              <span className="text-ink-muted">{t("resumo.lastAnalysis")} </span>
-              {settings.observerLastScanAt
-                ? format.dateTime(settings.observerLastScanAt, {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })
-                : "—"}
-            </span>
-            <span>
-              <span className="text-ink-muted">{t("resumo.pending")} </span>
-              {t("resumo.pendingCounts", { reviews: pending, stale: stale.length })}
-            </span>
-          </div>
-        ) : (
-          <p className="text-ink-muted">
-            {t("resumo.noKey")}{" "}
-            <Link href="/app/settings/ai/credentials" className="text-ink underline">
-              {t("resumo.noKeyLink")}
-            </Link>
-          </p>
-        )}
+        <AiSummary
+          settings={settings}
+          credential={credentials[0]}
+          counts={{ reviews, stale: stale.length }}
+        />
       </Card>
       <AiModuleTabs />
       {children}

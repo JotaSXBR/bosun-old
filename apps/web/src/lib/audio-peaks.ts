@@ -4,14 +4,7 @@
 
 export const AUDIO_WAVE_BARS = 40;
 
-/**
- * Buckets channel samples into `bars` peaks normalized to 0..1. A floor
- * keeps near-silent bars visible — WhatsApp-style waveforms never go
- * fully flat. Silence/empty input returns the deterministic fallback.
- */
-export function peaksFromChannel(data: Float32Array, bars: number): number[] {
-  if (bars <= 0) return [];
-  if (data.length === 0) return fallbackPeaks(bars);
+function rawPeaks(data: Float32Array, bars: number): number[] {
   const bucket = Math.max(1, Math.ceil(data.length / bars));
   const peaks = new Array<number>(bars).fill(0);
   for (let i = 0; i < bars; i++) {
@@ -23,6 +16,18 @@ export function peaksFromChannel(data: Float32Array, bars: number): number[] {
     }
     peaks[i] = peak;
   }
+  return peaks;
+}
+
+/**
+ * Buckets channel samples into `bars` peaks normalized to 0..1. A floor
+ * keeps near-silent bars visible — WhatsApp-style waveforms never go
+ * fully flat. Silence/empty input returns the deterministic fallback.
+ */
+export function peaksFromChannel(data: Float32Array, bars: number): number[] {
+  if (bars <= 0) return [];
+  if (data.length === 0) return fallbackPeaks(bars);
+  const peaks = rawPeaks(data, bars);
   const max = Math.max(...peaks);
   if (max <= 0) return fallbackPeaks(bars);
   return peaks.map((p) => Math.max(0.15, p / max));

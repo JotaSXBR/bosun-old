@@ -64,6 +64,20 @@ function RemoveButton({
   );
 }
 
+/** The label of a removable chip when it is also clickable (never nested in another button). */
+function LabelButton({
+  selected,
+  ...props
+}: React.ComponentProps<"button"> & { selected: boolean | null | undefined }) {
+  return (
+    <button
+      aria-pressed={Boolean(selected)}
+      className="focus-visible:shadow-focus inline-flex cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-inherit outline-none"
+      {...props}
+    />
+  );
+}
+
 export function Tag({
   children,
   icon,
@@ -87,28 +101,16 @@ export function Tag({
 
   // Never nest interactive elements: when removable, the root is a plain pill
   // and the label area becomes its own button.
-  if (onRemove && onClick) {
-    return (
-      <span className={cn(tagVariants({ selected, size, removable: true }), className)}>
-        <button
-          ref={ref}
-          type={type}
-          aria-pressed={Boolean(selected)}
-          onClick={onClick}
-          className="focus-visible:shadow-focus inline-flex cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-inherit outline-none"
-          {...props}
-        >
-          {content}
-        </button>
-        {remove}
-      </span>
-    );
-  }
-
   if (onRemove) {
     return (
       <span className={cn(tagVariants({ selected, size, removable: true }), className)}>
-        {content}
+        {onClick ? (
+          <LabelButton ref={ref} type={type} selected={selected} onClick={onClick} {...props}>
+            {content}
+          </LabelButton>
+        ) : (
+          content
+        )}
         {remove}
       </span>
     );

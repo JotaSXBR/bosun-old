@@ -51,7 +51,7 @@ export async function updateMacroAction(
 ): Promise<MacroActionResult> {
   const ctx = await requireTenantContext();
   try {
-    await updateMacro(getDb(), ctx, macroId, input);
+    await updateMacro(getDb(), ctx, { macroId, input });
     revalidateMacros();
     return { ok: true };
   } catch (error) {

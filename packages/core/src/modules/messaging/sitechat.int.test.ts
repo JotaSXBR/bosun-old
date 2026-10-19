@@ -128,8 +128,10 @@ describe("sendWidgetMessage + getWidgetConversation", () => {
       phone: "5511911112222",
     }));
     const result = await sendWidgetMessage(db, sessionToken, {
-      text: "quero um orçamento",
-      clientMessageId: "itsc-msg-1",
+      input: {
+        text: "quero um orçamento",
+        clientMessageId: "itsc-msg-1",
+      },
     });
     expect(result.processed).toHaveLength(1);
     expect(result.processed[0]?.eventType).toBe("message.received");
@@ -144,8 +146,10 @@ describe("sendWidgetMessage + getWidgetConversation", () => {
 
   it("dedupes on clientMessageId retry", async () => {
     const replay = await sendWidgetMessage(db, sessionToken, {
-      text: "quero um orçamento",
-      clientMessageId: "itsc-msg-1",
+      input: {
+        text: "quero um orçamento",
+        clientMessageId: "itsc-msg-1",
+      },
     });
     expect(replay.processed).toEqual([{ eventType: "message.received", messageId: null }]);
   });
@@ -195,7 +199,7 @@ describe("sendWidgetMessage + getWidgetConversation", () => {
   });
 
   it("rejects unknown session tokens", async () => {
-    await expect(sendWidgetMessage(db, "bad-token", { text: "oi" })).rejects.toThrow(
+    await expect(sendWidgetMessage(db, "bad-token", { input: { text: "oi" } })).rejects.toThrow(
       "Widget session",
     );
     await expect(getWidgetConversation(db, "bad-token")).rejects.toThrow("Widget session");
@@ -208,8 +212,10 @@ describe("sendWidgetMessage + getWidgetConversation", () => {
       phone: "5511900000001",
     });
     await sendWidgetMessage(db, first.sessionToken, {
-      text: "dados pessoais da vítima",
-      clientMessageId: "itsc-sec-1",
+      input: {
+        text: "dados pessoais da vítima",
+        clientMessageId: "itsc-sec-1",
+      },
     });
     const own = await getWidgetConversation(db, first.sessionToken);
     expect(own.messages.map((m) => m.text)).toContain("dados pessoais da vítima");
@@ -226,8 +232,10 @@ describe("sendWidgetMessage + getWidgetConversation", () => {
 
     // From the new session onward the visitor sees only their own messages.
     await sendWidgetMessage(db, attacker.sessionToken, {
-      text: "oi de novo",
-      clientMessageId: "itsc-sec-2",
+      input: {
+        text: "oi de novo",
+        clientMessageId: "itsc-sec-2",
+      },
     });
     const after = await getWidgetConversation(db, attacker.sessionToken);
     expect(after.messages.map((m) => m.text)).toEqual(["oi de novo"]);
@@ -244,7 +252,9 @@ describe("sendWidgetMessage + getWidgetConversation", () => {
       tx.update(siteChatSessions).set({ lastSeenAt: stale }).where(eq(siteChatSessions.token, tk)),
     );
     await expect(getWidgetConversation(db, tk)).rejects.toThrow("Widget session");
-    await expect(sendWidgetMessage(db, tk, { text: "oi" })).rejects.toThrow("Widget session");
+    await expect(sendWidgetMessage(db, tk, { input: { text: "oi" } })).rejects.toThrow(
+      "Widget session",
+    );
   });
 
   it("throttles the session touch: a fresh session does not write on every read", async () => {

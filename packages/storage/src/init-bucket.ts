@@ -17,12 +17,12 @@ const client = new S3Client({
   ...(env.storage.endpoint ? { endpoint: env.storage.endpoint } : {}),
   forcePathStyle: env.storage.forcePathStyle,
   credentials: {
-    accessKeyId: env.storage.accessKeyId as string,
-    secretAccessKey: env.storage.secretAccessKey as string,
+    accessKeyId: env.storage.accessKeyId!,
+    secretAccessKey: env.storage.secretAccessKey!,
   },
 });
 
-const bucket = env.storage.bucket as string;
+const bucket = env.storage.bucket!;
 
 try {
   await client.send(new HeadBucketCommand({ Bucket: bucket }));

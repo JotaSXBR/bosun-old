@@ -16,12 +16,12 @@ function makeProvider(): S3StorageProvider | null {
   }
   if (!isConfigured(env, "storage")) return null;
   return new S3StorageProvider({
-    bucket: env.storage.bucket as string,
+    bucket: env.storage.bucket!,
     region: env.storage.region ?? "us-east-1",
     endpoint: env.storage.endpoint,
     forcePathStyle: env.storage.forcePathStyle,
-    accessKeyId: env.storage.accessKeyId as string,
-    secretAccessKey: env.storage.secretAccessKey as string,
+    accessKeyId: env.storage.accessKeyId!,
+    secretAccessKey: env.storage.secretAccessKey!,
   });
 }
 
@@ -35,7 +35,7 @@ describe.skipIf(!provider)("S3StorageProvider (RustFS integration)", () => {
   );
 
   it("uploads, downloads and deletes an object", async () => {
-    const storage = provider as S3StorageProvider;
+    const storage = provider!;
     await storage.upload({ key, body: "hello rustfs", contentType: "text/plain" });
     const res = await storage.download(key);
     expect(new TextDecoder().decode(res.body)).toBe("hello rustfs");
@@ -45,7 +45,7 @@ describe.skipIf(!provider)("S3StorageProvider (RustFS integration)", () => {
   });
 
   it("returns a signed GET url that can be fetched", async () => {
-    const storage = provider as S3StorageProvider;
+    const storage = provider!;
     await storage.upload({ key, body: "signed" });
     const url = await storage.getSignedUrl(key, {
       method: "get",

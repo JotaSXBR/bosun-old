@@ -13,6 +13,39 @@ import { deleteLlmCredentialAction } from "@/server/actions/ai";
 
 import { CredentialCreateForm } from "./credential-form";
 
+function CredentialItem({
+  cred,
+  canManage,
+  pending,
+  onRemove,
+}: {
+  cred: LlmCredentialPublic;
+  canManage: boolean;
+  pending: boolean;
+  onRemove: () => void;
+}) {
+  const t = useTranslations("settings.ai.credentials");
+  return (
+    <li className="flex items-center justify-between gap-3 border-b pb-2 last:border-0">
+      <div className="flex items-center gap-2 text-sm">
+        <Badge tone="neutral">{cred.provider}</Badge>
+        <span className="font-medium">{cred.label ?? t("unlabeled")}</span>
+        <span className="text-ink-muted">{cred.model}</span>
+        <span className="text-ink-muted text-xs">
+          {t("priority")} {cred.priority}
+        </span>
+        {cred.zdr && <Badge tone="neutral">ZDR</Badge>}
+        {cred.status !== "active" && <Badge tone="neutral">{t("statusDisabled")}</Badge>}
+      </div>
+      {canManage && (
+        <Button size="sm" variant="danger" disabled={pending} onClick={onRemove}>
+          {t("remove")}
+        </Button>
+      )}
+    </li>
+  );
+}
+
 export function CredentialsSection({
   credentials,
   canManage,
@@ -46,26 +79,13 @@ export function CredentialsSection({
       ) : (
         <ul className="space-y-2" data-testid="credential-list">
           {credentials.map((cred) => (
-            <li
+            <CredentialItem
               key={cred.id}
-              className="flex items-center justify-between gap-3 border-b pb-2 last:border-0"
-            >
-              <div className="flex items-center gap-2 text-sm">
-                <Badge tone="neutral">{cred.provider}</Badge>
-                <span className="font-medium">{cred.label ?? t("unlabeled")}</span>
-                <span className="text-ink-muted">{cred.model}</span>
-                <span className="text-ink-muted text-xs">
-                  {t("priority")} {cred.priority}
-                </span>
-                {cred.zdr && <Badge tone="neutral">ZDR</Badge>}
-                {cred.status !== "active" && <Badge tone="neutral">{t("statusDisabled")}</Badge>}
-              </div>
-              {canManage && (
-                <Button size="sm" variant="danger" disabled={pending} onClick={() => remove(cred)}>
-                  {t("remove")}
-                </Button>
-              )}
-            </li>
+              cred={cred}
+              canManage={canManage}
+              pending={pending}
+              onRemove={() => remove(cred)}
+            />
           ))}
         </ul>
       )}

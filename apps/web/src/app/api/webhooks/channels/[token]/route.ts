@@ -9,7 +9,21 @@ import { getDb } from "@crm/db";
 import { captureException, createLogger } from "@crm/observability";
 import type { NextRequest } from "next/server";
 
+import { readWebhookRequest } from "../../../../../lib/webhook-request";
+
 const logger = createLogger({ bindings: { component: "channel-webhook" } });
+
+function failure(error: unknown): Response {
+  if (error instanceof NotFoundError) {
+    return Response.json({ ok: false }, { status: 404 });
+  }
+  if (error instanceof WebhookVerificationError) {
+    return Response.json({ ok: false }, { status: 401 });
+  }
+  captureException(error, { route: "webhooks.channels" });
+  logger.error("channel webhook failed", { error: (error as Error).message });
+  return Response.json({ ok: false }, { status: 500 });
+}
 
 /**
  * Channel webhook ingestion. The path token is the only routing credential:
@@ -23,29 +37,18 @@ export async function POST(
   ctx: { params: Promise<{ token: string }> },
 ): Promise<Response> {
   const { token } = await ctx.params;
-  const rawBody = await request.text();
-
-  const headers: Record<string, string> = {};
-  request.headers.forEach((value, key) => {
-    headers[key.toLowerCase()] = value;
-  });
-  const query: Record<string, string> = {};
-  new URL(request.url).searchParams.forEach((value, key) => {
-    query[key] = value;
-  });
+  const webhook = await readWebhookRequest(request);
 
   try {
-    const result = await ingestChannelWebhook(
-      getDb(),
-      token,
-      { rawBody, headers, query },
-      {
+    const result = await ingestChannelWebhook(getDb(), token, {
+      request: webhook,
+      deps: {
         // Job rows commit atomically with each event's ingest transaction.
         enqueue: (executor, payload) => enqueueChannelEventProcessed(payload, executor),
         enqueueAvatar: (executor, payload) => enqueueContactAvatar(payload, executor),
         enqueueTranscribe: (executor, payload) => enqueueTranscribeAudio(payload, executor),
       },
-    );
+    });
     if (result.processed.length === 0) {
       logger.warn("channel webhook carried no recognized events", {
         channelConnectionId: result.channelConnectionId,
@@ -53,14 +56,6 @@ export async function POST(
     }
     return Response.json({ ok: true, processed: result.processed.length });
   } catch (error) {
-    if (error instanceof NotFoundError) {
-      return Response.json({ ok: false }, { status: 404 });
-    }
-    if (error instanceof WebhookVerificationError) {
-      return Response.json({ ok: false }, { status: 401 });
-    }
-    captureException(error, { route: "webhooks.channels" });
-    logger.error("channel webhook failed", { error: (error as Error).message });
-    return Response.json({ ok: false }, { status: 500 });
+    return failure(error);
   }
 }

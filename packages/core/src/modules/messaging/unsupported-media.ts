@@ -29,6 +29,18 @@ type ReplyPlan =
   | { ok: true; organizationId: string; conv: ConversationRow; text: string; now: Date }
   | { ok: false; reason: string };
 
+function isUnsupportedInbound(
+  message: Awaited<ReturnType<typeof getMessage>>,
+  conv: ConversationRow,
+): boolean {
+  const meta = message?.metadata as { unsupportedMedia?: boolean } | undefined;
+  return (
+    message?.conversationId === conv.id &&
+    message.direction === "inbound" &&
+    meta?.unsupportedMedia === true
+  );
+}
+
 /** Loads conv + settings + the ingested message and applies every gate. */
 async function planReply(
   db: Database,
@@ -47,14 +59,7 @@ async function planReply(
   }
   const template = settings?.unsupportedMediaMessage?.trim();
   if (!template) return { ok: false, reason: "not-configured" };
-  const meta = message?.metadata as { unsupportedMedia?: boolean } | undefined;
-  const flagged =
-    message?.conversationId === conv.id &&
-    message.direction === "inbound" &&
-    meta?.unsupportedMedia === true;
-  if (!flagged) {
-    return { ok: false, reason: "not-unsupported" };
-  }
+  if (!isUnsupportedInbound(message, conv)) return { ok: false, reason: "not-unsupported" };
   return { ok: true, organizationId: opts.organizationId, conv, text: template, now };
 }
 
@@ -105,8 +110,7 @@ async function reserveMarker(
 async function deliverReply(
   db: Database,
   plan: Extract<ReplyPlan, { ok: true }>,
-  marker: MessageRow,
-  deps?: { provider?: ChannelProvider },
+  { marker, deps }: { marker: MessageRow; deps?: { provider?: ChannelProvider } },
 ): Promise<UnsupportedMediaResult> {
   const provider =
     deps?.provider ??
@@ -136,9 +140,12 @@ async function deliverReply(
         updatedAt: new Date(),
       })
       .where(sql`${messages.id} = ${marker.id}`);
-    await updateConversationLastMessage(tx, plan.conv.id, plan.now, {
-      direction: "outbound",
-      preview: plan.text,
+    await updateConversationLastMessage(tx, plan.conv.id, {
+      lastMessageAt: plan.now,
+      lastMessage: {
+        direction: "outbound",
+        preview: plan.text,
+      },
     });
     await emitDomainEvent(tx, {
       type: "message.sent",
@@ -168,5 +175,5 @@ export async function maybeSendUnsupportedMediaReply(
     reserveMarker(tx, plan.conv, plan.text),
   );
   if (!marker) return { sent: false, reason: "already-sent" };
-  return deliverReply(db, plan, marker, deps);
+  return deliverReply(db, plan, { marker, deps });
 }

@@ -7,7 +7,8 @@
 import { Icon } from "@crm/design-system/components/icon";
 import { cn } from "@crm/design-system/lib/utils";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 
 import { AUDIO_WAVE_BARS, fallbackPeaks, loadAudioPeaks } from "@/lib/audio-peaks";
 
@@ -21,22 +22,9 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function AudioPlayer({
-  src,
-  durationHint,
-  peaks: peaksProp,
-}: {
-  src: string;
-  durationHint?: number;
-  peaks?: number[];
-}) {
-  const t = useTranslations("message");
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
+/** Track length: for webm blobs without metadata it is discovered by seeking a detached probe. */
+function useProbedDuration(src: string, durationHint: number | undefined) {
   const [duration, setDuration] = useState(0);
-  const [speed, setSpeed] = useState<number>(1);
-  const [loadedPeaks, setLoadedPeaks] = useState<number[] | null>(null);
 
   // MediaRecorder webm blobs carry no duration metadata (el.duration is
   // Infinity). Discovering it by seeking works — but the seek must run on
@@ -64,6 +52,12 @@ export function AudioPlayer({
       probe.load();
     };
   }, [src, durationHint]);
+  return [duration, setDuration] as const;
+}
+
+/** Waveform bars: the prop, else decoded lazily, else the flat fallback. */
+function useWaveBars(src: string, peaksProp: number[] | undefined) {
+  const [loadedPeaks, setLoadedPeaks] = useState<number[] | null>(null);
 
   // Waveform peaks: the prop wins (the recorder decodes its own blob);
   // otherwise fetch+decode lazily. Failure falls back to flat bars so
@@ -78,18 +72,12 @@ export function AudioPlayer({
       live = false;
     };
   }, [src, peaksProp]);
+  return peaksProp ?? loadedPeaks ?? FALLBACK;
+}
 
-  // Refs only inside handlers/effects — render reads state alone.
-  // Blob sources can report Infinity on the element itself, so the
-  // probe-discovered duration (or the recorder's hint) is the fallback.
-  const elementDuration = () => {
-    const el = audioRef.current;
-    return el && Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0;
-  };
-  const hint =
-    durationHint != null && Number.isFinite(durationHint) && durationHint > 0 ? durationHint : 0;
-  const displayTotal = Number.isFinite(duration) && duration > 0 ? duration : hint;
-  const played = displayTotal > 0 ? Math.min(1, elapsed / displayTotal) : 0;
+function usePlayback(audioRef: RefObject<HTMLAudioElement | null>) {
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState<number>(1);
 
   const cycleSpeed = () => {
     const next = SPEEDS[(SPEEDS.indexOf(speed as (typeof SPEEDS)[number]) + 1) % SPEEDS.length]!;
@@ -102,6 +90,31 @@ export function AudioPlayer({
     if (!el) return;
     if (el.paused) void el.play();
     else el.pause();
+  };
+  return { playing, setPlaying, speed, cycleSpeed, toggle };
+}
+
+/** Total shown in the UI and the played fraction; the hint covers Infinity-duration blobs. */
+function playbackTotals(duration: number, durationHint: number | undefined, elapsed: number) {
+  const hint =
+    durationHint != null && Number.isFinite(durationHint) && durationHint > 0 ? durationHint : 0;
+  const displayTotal = Number.isFinite(duration) && duration > 0 ? duration : hint;
+  const played = displayTotal > 0 ? Math.min(1, elapsed / displayTotal) : 0;
+  return { displayTotal, played };
+}
+
+/** Pointer and arrow-key seeking on the waveform. */
+function useWaveSeek(args: {
+  audioRef: RefObject<HTMLAudioElement | null>;
+  displayTotal: number;
+  setElapsed: (seconds: number) => void;
+}) {
+  const { audioRef, displayTotal, setElapsed } = args;
+  // Refs only inside handlers — render reads state alone. Blob sources can
+  // report Infinity on the element itself, so the discovered total is the fallback.
+  const elementDuration = () => {
+    const el = audioRef.current;
+    return el && Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0;
   };
 
   const seekTo = (fraction: number) => {
@@ -125,78 +138,162 @@ export function AudioPlayer({
     if (!el || total <= 0) return;
     seekTo((el.currentTime + (e.key === "ArrowRight" ? 5 : -5)) / total);
   };
+  return { seekFromPointer, onWaveKey };
+}
 
-  const bars = peaksProp ?? loadedPeaks ?? FALLBACK;
+function PlayButton({
+  playing,
+  label,
+  onClick,
+}: {
+  playing: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className="bg-ink-on-signal/20 flex size-8 shrink-0 items-center justify-center rounded-full"
+    >
+      <Icon name={playing ? "pause" : "play"} className="size-4" />
+    </button>
+  );
+}
+
+function SpeedButton({
+  speed,
+  label,
+  onClick,
+}: {
+  speed: number;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className="bg-ink-on-signal/20 shrink-0 rounded-xs px-1.5 py-0.5 text-xs font-medium tabular-nums"
+    >
+      {speed}×
+    </button>
+  );
+}
+
+function Waveform({
+  bars,
+  played,
+  valueText,
+  label,
+  seekFromPointer,
+  onWaveKey,
+}: {
+  bars: number[];
+  played: number;
+  valueText: string;
+  label: string;
+  seekFromPointer: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onWaveKey: (e: React.KeyboardEvent<HTMLDivElement>) => void;
+}) {
+  return (
+    <div
+      role="slider"
+      tabIndex={0}
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(played * 100)}
+      aria-valuetext={valueText}
+      className="flex h-6 min-w-0 flex-1 cursor-pointer touch-none items-center gap-px"
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        seekFromPointer(e);
+      }}
+      onPointerMove={(e) => {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) seekFromPointer(e);
+      }}
+      onKeyDown={onWaveKey}
+      data-testid="audio-waveform"
+    >
+      {bars.map((p, i) => (
+        <span
+          key={i}
+          aria-hidden
+          className={cn(
+            "h-(--bar-h) min-w-0.5 flex-1 rounded-full",
+            i / bars.length < played ? "bg-current" : "bg-current/35",
+          )}
+          style={{ "--bar-h": `${Math.round(p * 100)}%` } as CSSProperties}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** <audio> handlers that mirror the element into state. */
+function useAudioEvents(setters: {
+  setPlaying: (playing: boolean) => void;
+  setElapsed: (seconds: number) => void;
+  setDuration: (seconds: number) => void;
+}) {
+  const { setPlaying, setElapsed, setDuration } = setters;
+  const syncDuration = (e: React.SyntheticEvent<HTMLAudioElement>) => {
+    const d = e.currentTarget.duration;
+    if (Number.isFinite(d)) setDuration(d);
+  };
+  return {
+    onPlay: () => setPlaying(true),
+    onPause: () => setPlaying(false),
+    onTimeUpdate: (e: React.SyntheticEvent<HTMLAudioElement>) =>
+      setElapsed(e.currentTarget.currentTime),
+    onLoadedMetadata: syncDuration,
+    onDurationChange: syncDuration,
+    onEnded: () => setElapsed(0),
+  };
+}
+
+export function AudioPlayer({
+  src,
+  durationHint,
+  peaks: peaksProp,
+}: {
+  src: string;
+  durationHint?: number;
+  peaks?: number[];
+}) {
+  const t = useTranslations("message");
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [duration, setDuration] = useProbedDuration(src, durationHint);
+  const bars = useWaveBars(src, peaksProp);
+  const { displayTotal, played } = playbackTotals(duration, durationHint, elapsed);
+  const { playing, setPlaying, speed, cycleSpeed, toggle } = usePlayback(audioRef);
+  const { seekFromPointer, onWaveKey } = useWaveSeek({ audioRef, displayTotal, setElapsed });
+  const audioEvents = useAudioEvents({ setPlaying, setElapsed, setDuration });
 
   return (
     <div className="flex w-64 max-w-full items-center gap-2" data-testid="audio-player">
-      <audio
-        ref={audioRef}
-        src={src}
-        preload="metadata"
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onTimeUpdate={(e) => setElapsed(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => {
-          const d = e.currentTarget.duration;
-          if (Number.isFinite(d)) setDuration(d);
-        }}
-        onDurationChange={(e) => {
-          const d = e.currentTarget.duration;
-          if (Number.isFinite(d)) setDuration(d);
-        }}
-        onEnded={() => setElapsed(0)}
-      />
-      <button
-        type="button"
+      <audio ref={audioRef} src={src} preload="metadata" {...audioEvents} />
+      <PlayButton
+        playing={playing}
+        label={playing ? t("audioPause") : t("audioPlay")}
         onClick={toggle}
-        aria-label={playing ? t("audioPause") : t("audioPlay")}
-        className="bg-ink-on-signal/20 flex size-8 shrink-0 items-center justify-center rounded-full"
-      >
-        <Icon name={playing ? "pause" : "play"} className="size-4" />
-      </button>
-      <div
-        role="slider"
-        tabIndex={0}
-        aria-label={t("audioSeek")}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(played * 100)}
-        aria-valuetext={`${formatTime(elapsed)} / ${formatTime(displayTotal)}`}
-        className="flex h-6 min-w-0 flex-1 cursor-pointer touch-none items-center gap-px"
-        onPointerDown={(e) => {
-          e.currentTarget.setPointerCapture(e.pointerId);
-          seekFromPointer(e);
-        }}
-        onPointerMove={(e) => {
-          if (e.currentTarget.hasPointerCapture(e.pointerId)) seekFromPointer(e);
-        }}
-        onKeyDown={onWaveKey}
-        data-testid="audio-waveform"
-      >
-        {bars.map((p, i) => (
-          <span
-            key={i}
-            aria-hidden
-            className={cn(
-              "min-w-0.5 flex-1 rounded-full",
-              i / bars.length < played ? "bg-current" : "bg-current/35",
-            )}
-            style={{ height: `${Math.round(p * 100)}%` }}
-          />
-        ))}
-      </div>
+      />
+      <Waveform
+        bars={bars}
+        played={played}
+        valueText={`${formatTime(elapsed)} / ${formatTime(displayTotal)}`}
+        label={t("audioSeek")}
+        seekFromPointer={seekFromPointer}
+        onWaveKey={onWaveKey}
+      />
       <span className="min-w-9 shrink-0 text-xs tabular-nums">
         {formatTime(playing || elapsed > 0 ? elapsed : displayTotal)}
       </span>
-      <button
-        type="button"
-        onClick={cycleSpeed}
-        aria-label={t("audioSpeed")}
-        className="bg-ink-on-signal/20 shrink-0 rounded-xs px-1.5 py-0.5 text-xs font-medium tabular-nums"
-      >
-        {speed}×
-      </button>
+      <SpeedButton speed={speed} label={t("audioSpeed")} onClick={cycleSpeed} />
     </div>
   );
 }

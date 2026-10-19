@@ -104,7 +104,7 @@ describe("subscribeDomainEvents + ingestChannelEvent", () => {
     const unsubscribeA = await subscribeDomainEvents(orgA, (event) => eventsA.push(event));
     try {
       const result = await withTenant(db, orgA, (tx) =>
-        ingestChannelEvent(tx, connA, messageEvent("rt_a_1", "rt-111@c.us")),
+        ingestChannelEvent(tx, connA, { event: messageEvent("rt_a_1", "rt-111@c.us") }),
       );
       expect(result.messageId).not.toBeNull();
 
@@ -129,7 +129,7 @@ describe("subscribeDomainEvents + ingestChannelEvent", () => {
 
       // Idempotent webhook replay: no new row → no new notifications.
       await withTenant(db, orgA, (tx) =>
-        ingestChannelEvent(tx, connA, messageEvent("rt_a_1", "rt-111@c.us")),
+        ingestChannelEvent(tx, connA, { event: messageEvent("rt_a_1", "rt-111@c.us") }),
       );
       await sleep(500);
       expect(eventsA).toHaveLength(2);
@@ -140,7 +140,7 @@ describe("subscribeDomainEvents + ingestChannelEvent", () => {
       const unsubscribeB = await subscribeDomainEvents(orgB, (event) => eventsB.push(event));
       try {
         await withTenant(db, orgB, (tx) =>
-          ingestChannelEvent(tx, connB, messageEvent("rt_b_1", "rt-222@c.us")),
+          ingestChannelEvent(tx, connB, { event: messageEvent("rt_b_1", "rt-222@c.us") }),
         );
         await waitForEvents(eventsB, 2);
         expect(eventsB.every((e) => e.organizationId === orgB)).toBe(true);

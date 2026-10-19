@@ -265,7 +265,7 @@ export async function setDealLabelsAction(input: SetDealLabelsInput) {
 export async function searchContactsAction(query?: string) {
   const ctx = await requireTenantContext();
   try {
-    const rows = await searchContacts(getDb(), ctx, query);
+    const rows = await searchContacts(getDb(), ctx, { query });
     return { ok: true as const, data: rows };
   } catch (error) {
     return { ok: false as const, error: errorMessage(error, "Falha ao buscar contatos"), data: [] };

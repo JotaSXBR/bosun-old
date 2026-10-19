@@ -51,87 +51,103 @@ const tokenResponse = z.object({
 const errorResponse = z.object({ error: z.string() });
 const userinfoResponse = z.object({ email: z.string().optional() });
 
-export function createGoogleOAuthClient(fetchImpl: typeof fetch = fetch): GoogleOAuthClient {
-  async function postToken(params: Record<string, string>) {
-    const response = await fetchImpl(TOKEN_URL, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams(params),
-    });
-    const body: unknown = await response.json().catch(() => null);
-    if (!response.ok) {
-      const parsed = errorResponse.safeParse(body);
-      throw new GoogleOAuthError(parsed.success ? parsed.data.error : `http_${response.status}`);
-    }
-    const parsed = tokenResponse.safeParse(body);
-    if (!parsed.success) throw new GoogleOAuthError("invalid_token_response");
-    return parsed.data;
+type OAuthInput<K extends "exchangeCode" | "revokeToken" | "refreshAccessToken"> = Parameters<
+  GoogleOAuthClient[K]
+>[0];
+
+async function postToken(fetchImpl: typeof fetch, params: Record<string, string>) {
+  const response = await fetchImpl(TOKEN_URL, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params),
+  });
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) throw oauthError(response, body);
+  const parsed = tokenResponse.safeParse(body);
+  if (!parsed.success) throw new GoogleOAuthError("invalid_token_response");
+  return parsed.data;
+}
+
+function oauthError(response: Response, body: unknown): GoogleOAuthError {
+  const parsed = errorResponse.safeParse(body);
+  return new GoogleOAuthError(parsed.success ? parsed.data.error : `http_${response.status}`);
+}
+
+const expiresAt = (seconds: number) => new Date(Date.now() + seconds * 1000).toISOString();
+
+const buildAuthUrl: GoogleOAuthClient["buildAuthUrl"] = ({ clientId, redirectUri, state }) => {
+  const url = new URL(AUTH_URL);
+  url.search = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: GOOGLE_SCOPES.join(" "),
+    access_type: "offline",
+    prompt: "consent",
+    state,
+  }).toString();
+  return url.toString();
+};
+
+async function exchangeCode(
+  fetchImpl: typeof fetch,
+  { clientId, clientSecret, redirectUri, code }: OAuthInput<"exchangeCode">,
+) {
+  const token = await postToken(fetchImpl, {
+    grant_type: "authorization_code",
+    client_id: clientId,
+    client_secret: clientSecret,
+    redirect_uri: redirectUri,
+    code,
+  });
+  // Granular consent: the user may untick scopes on the consent screen.
+  if (!token.scope?.split(" ").includes(CONTACTS_SCOPE)) {
+    throw new GoogleOAuthError("scope_not_granted");
   }
-
-  const expiresAt = (seconds: number) => new Date(Date.now() + seconds * 1000).toISOString();
-
+  if (!token.refresh_token) throw new GoogleOAuthError("missing_refresh_token");
+  const info = await fetchImpl(USERINFO_URL, {
+    headers: { authorization: `Bearer ${token.access_token}` },
+  });
+  const body: unknown = info.ok ? await info.json().catch(() => null) : null;
   return {
-    buildAuthUrl({ clientId, redirectUri, state }) {
-      const url = new URL(AUTH_URL);
-      url.search = new URLSearchParams({
-        client_id: clientId,
-        redirect_uri: redirectUri,
-        response_type: "code",
-        scope: GOOGLE_SCOPES.join(" "),
-        access_type: "offline",
-        prompt: "consent",
-        state,
-      }).toString();
-      return url.toString();
+    tokens: {
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token,
+      expiresAt: expiresAt(token.expires_in),
     },
+    accountEmail: userinfoResponse.safeParse(body).data?.email ?? null,
+  };
+}
 
-    async exchangeCode({ clientId, clientSecret, redirectUri, code }) {
-      const token = await postToken({
-        grant_type: "authorization_code",
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: redirectUri,
-        code,
-      });
-      // Granular consent: the user may untick scopes on the consent screen.
-      if (!token.scope?.split(" ").includes(CONTACTS_SCOPE)) {
-        throw new GoogleOAuthError("scope_not_granted");
-      }
-      if (!token.refresh_token) throw new GoogleOAuthError("missing_refresh_token");
-      const info = await fetchImpl(USERINFO_URL, {
-        headers: { authorization: `Bearer ${token.access_token}` },
-      });
-      const body: unknown = info.ok ? await info.json().catch(() => null) : null;
-      return {
-        tokens: {
-          accessToken: token.access_token,
-          refreshToken: token.refresh_token,
-          expiresAt: expiresAt(token.expires_in),
-        },
-        accountEmail: userinfoResponse.safeParse(body).data?.email ?? null,
-      };
-    },
+async function revokeToken(fetchImpl: typeof fetch, { token }: OAuthInput<"revokeToken">) {
+  const response = await fetchImpl(REVOKE_URL, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ token }),
+  });
+  if (response.ok) return;
+  const body: unknown = await response.json().catch(() => null);
+  throw oauthError(response, body);
+}
 
-    async revokeToken({ token }) {
-      const response = await fetchImpl(REVOKE_URL, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ token }),
-      });
-      if (response.ok) return;
-      const body: unknown = await response.json().catch(() => null);
-      const parsed = errorResponse.safeParse(body);
-      throw new GoogleOAuthError(parsed.success ? parsed.data.error : `http_${response.status}`);
-    },
+async function refreshAccessToken(
+  fetchImpl: typeof fetch,
+  { clientId, clientSecret, refreshToken }: OAuthInput<"refreshAccessToken">,
+) {
+  const token = await postToken(fetchImpl, {
+    grant_type: "refresh_token",
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: refreshToken,
+  });
+  return { accessToken: token.access_token, expiresAt: expiresAt(token.expires_in) };
+}
 
-    async refreshAccessToken({ clientId, clientSecret, refreshToken }) {
-      const token = await postToken({
-        grant_type: "refresh_token",
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-      });
-      return { accessToken: token.access_token, expiresAt: expiresAt(token.expires_in) };
-    },
+export function createGoogleOAuthClient(fetchImpl: typeof fetch = fetch): GoogleOAuthClient {
+  return {
+    buildAuthUrl,
+    exchangeCode: (input) => exchangeCode(fetchImpl, input),
+    revokeToken: (input) => revokeToken(fetchImpl, input),
+    refreshAccessToken: (input) => refreshAccessToken(fetchImpl, input),
   };
 }

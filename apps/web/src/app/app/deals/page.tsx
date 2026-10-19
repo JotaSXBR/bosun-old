@@ -1,3 +1,4 @@
+import type { TenantContext } from "@crm/core";
 import { NotFoundError } from "@crm/core";
 import type { FunnelRow } from "@crm/core/leads";
 import { Button } from "@crm/design-system/components/button";
@@ -46,6 +47,15 @@ function EmptyFunnel({
   );
 }
 
+async function loadBoard(ctx: TenantContext, funnelId: string) {
+  try {
+    return await getFunnelBoard(ctx, funnelId);
+  } catch (error) {
+    if (error instanceof NotFoundError) notFound();
+    throw error;
+  }
+}
+
 export default async function DealsPage({
   searchParams,
 }: {
@@ -55,7 +65,6 @@ export default async function DealsPage({
   const ctx = await requireTenantContext();
   const { funnel: requested } = await searchParams;
   const [funnels, labels] = await Promise.all([listOrgFunnels(ctx), listOrgLabels(ctx)]);
-  const canWrite = hasPermission(ctx.role, { leads: ["write"] });
   const canManage = hasPermission(ctx.role, { leads: ["manage"] });
 
   const funnel = firstFunnel(funnels, requested);
@@ -70,13 +79,7 @@ export default async function DealsPage({
     );
   }
 
-  let board;
-  try {
-    board = await getFunnelBoard(ctx, funnel.id);
-  } catch (error) {
-    if (error instanceof NotFoundError) notFound();
-    throw error;
-  }
+  const board = await loadBoard(ctx, funnel.id);
 
   return (
     <main className="space-y-4 p-8">
@@ -85,7 +88,7 @@ export default async function DealsPage({
         board={board}
         funnels={funnels}
         labels={labels}
-        canWrite={canWrite}
+        canWrite={hasPermission(ctx.role, { leads: ["write"] })}
         canManage={canManage}
       />
     </main>

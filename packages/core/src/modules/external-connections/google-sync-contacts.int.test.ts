@@ -59,18 +59,18 @@ const clearOrg = (organizationId: string) =>
 
 async function connect() {
   const admin = ctx("admin");
-  const { authUrl } = await saveGoogleClient(
-    db,
-    admin,
-    { clientId: "client-id-123", clientSecret: "client-secret-456", redirectUri: REDIRECT },
+  const { authUrl } = await saveGoogleClient(db, admin, {
+    input: { clientId: "client-id-123", clientSecret: "client-secret-456", redirectUri: REDIRECT },
     oauth,
-  );
-  await completeGoogleAuthorization(
-    db,
-    admin,
-    { code: "code", state: new URL(authUrl).searchParams.get("state")!, redirectUri: REDIRECT },
+  });
+  await completeGoogleAuthorization(db, admin, {
+    input: {
+      code: "code",
+      state: new URL(authUrl).searchParams.get("state")!,
+      redirectUri: REDIRECT,
+    },
     oauth,
-  );
+  });
 }
 
 async function addContact(

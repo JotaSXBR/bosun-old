@@ -147,12 +147,10 @@ describe("startOutboundConversation", () => {
     });
     // Composer path: sendOutboundMessage on an in_progress ticket owned by
     // the caller → provider send + persisted message + waiting_customer.
-    const message = await sendOutboundMessage(
-      db,
-      ctx(orgA, userId, "agent"),
-      { conversationId: conversation.id, text: "Olá, posso ajudar?" },
-      { provider },
-    );
+    const message = await sendOutboundMessage(db, ctx(orgA, userId, "agent"), {
+      input: { conversationId: conversation.id, text: "Olá, posso ajudar?" },
+      deps: { provider },
+    });
     expect(message.direction).toBe("outbound");
     expect(message.authorId).toBe(userId);
     expect(provider.sentMessages).toHaveLength(1);
@@ -201,7 +199,9 @@ describe("startOutboundConversation", () => {
         );
       return row!;
     });
-    await resolveConversation(db, ctx(orgA, userId, "agent"), { conversationId: first.id });
+    await resolveConversation(db, ctx(orgA, userId, "agent"), {
+      input: { conversationId: first.id },
+    });
 
     const { conversation, created } = await startOutboundConversation(
       db,
@@ -259,11 +259,13 @@ describe("startOutboundConversation", () => {
     const connRef = { id: wahaConn.id, organizationId: orgA, kind: "waha" };
     await withTenant(db, orgA, (tx) =>
       ingestChannelEvent(tx, connRef, {
-        type: "message.received",
-        externalMessageId: "false_5511911112222@c.us_OBF1",
-        from: { channelUserId: "5511911112222@c.us", displayName: "WA Contact" },
-        content: { type: "text", text: "oi, recebi" },
-        timestamp: new Date(),
+        event: {
+          type: "message.received",
+          externalMessageId: "false_5511911112222@c.us_OBF1",
+          from: { channelUserId: "5511911112222@c.us", displayName: "WA Contact" },
+          content: { type: "text", text: "oi, recebi" },
+          timestamp: new Date(),
+        },
       }),
     );
     const rows = await withTenant(db, orgA, (tx) =>

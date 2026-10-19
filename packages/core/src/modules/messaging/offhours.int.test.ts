@@ -44,14 +44,20 @@ async function configureOffHours(org: string) {
 }
 
 /** Ingests an inbound message and returns the ticket that received it. */
-async function inbound(org: string, conn: ConnectionRef, channelUserId: string, msgId: string) {
+async function inbound(
+  org: string,
+  conn: ConnectionRef,
+  { channelUserId, msgId }: { channelUserId: string; msgId: string },
+) {
   await withTenant(db, org, (tx) =>
     ingestChannelEvent(tx, conn, {
-      type: "message.received",
-      externalMessageId: msgId,
-      from: { channelUserId, displayName: "Cust" },
-      content: { type: "text", text: "oi" },
-      timestamp: new Date("2024-04-07"),
+      event: {
+        type: "message.received",
+        externalMessageId: msgId,
+        from: { channelUserId, displayName: "Cust" },
+        content: { type: "text", text: "oi" },
+        timestamp: new Date("2024-04-07"),
+      },
     }),
   );
   return withTenant(db, org, async (tx) => {
@@ -129,7 +135,10 @@ const sunday = new Date("2024-04-07T15:00:00Z"); // 12:00 SP Sunday
 
 describe("maybeSendOffHoursReply", () => {
   it("sends one reply per conversation per day, marked as system", async () => {
-    const conv = await inbound(orgA, connA, "oh-1@c.us", "false_oh1@c.us_1");
+    const conv = await inbound(orgA, connA, {
+      channelUserId: "oh-1@c.us",
+      msgId: "false_oh1@c.us_1",
+    });
     const provider = new FakeChannelProvider();
 
     const first = await maybeSendOffHoursReply(
@@ -167,7 +176,10 @@ describe("maybeSendOffHoursReply", () => {
   });
 
   it("stays silent inside business hours and when not configured", async () => {
-    const within = await inbound(orgA, connA, "oh-2@c.us", "false_oh2@c.us_1");
+    const within = await inbound(orgA, connA, {
+      channelUserId: "oh-2@c.us",
+      msgId: "false_oh2@c.us_1",
+    });
     const provider = new FakeChannelProvider();
     // Monday 10:00 SP = inside the window.
     const monday10 = new Date("2024-04-08T13:00:00Z");
@@ -180,7 +192,10 @@ describe("maybeSendOffHoursReply", () => {
     expect(provider.sentMessages).toHaveLength(0);
 
     // Org B never set offHoursMessage → hard no.
-    const ticketB = await inbound(orgA, connA, "oh-3@c.us", "false_oh3@c.us_1");
+    const ticketB = await inbound(orgA, connA, {
+      channelUserId: "oh-3@c.us",
+      msgId: "false_oh3@c.us_1",
+    });
     const noCfg = await maybeSendOffHoursReply(
       db,
       { organizationId: orgB, conversationId: ticketB.id, now: sunday },
@@ -210,11 +225,13 @@ describe("maybeSendOffHoursReply", () => {
         tx,
         { id: conn!.id, organizationId: orgB, kind: conn!.kind },
         {
-          type: "message.received",
-          externalMessageId: "false_ohb@c.us_1",
-          from: { channelUserId: "ohb@c.us", displayName: "B" },
-          content: { type: "text", text: "oi" },
-          timestamp: new Date("2024-04-07"),
+          event: {
+            type: "message.received",
+            externalMessageId: "false_ohb@c.us_1",
+            from: { channelUserId: "ohb@c.us", displayName: "B" },
+            content: { type: "text", text: "oi" },
+            timestamp: new Date("2024-04-07"),
+          },
         },
       );
       const [c] = await tx
@@ -241,7 +258,10 @@ describe("maybeSendOffHoursReply", () => {
   });
 
   it("provider failure marks the marker failed and a retry sends again", async () => {
-    const conv = await inbound(orgA, connA, "oh-4@c.us", "false_oh4@c.us_1");
+    const conv = await inbound(orgA, connA, {
+      channelUserId: "oh-4@c.us",
+      msgId: "false_oh4@c.us_1",
+    });
     const failing = new FakeChannelProvider();
     failing.sendMessageError = new Error("provider down");
 

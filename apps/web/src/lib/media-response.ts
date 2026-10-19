@@ -19,7 +19,7 @@ const INLINE_TYPES = new Set([
 /** MIME without parameters, lowercased (e.g. "Image/PNG; charset=x" → "image/png"). */
 function normalizeMime(contentType: string | undefined | null): string | null {
   const mime = contentType?.split(";")[0]?.trim().toLowerCase();
-  return mime || null;
+  return mime === "" ? null : (mime ?? null);
 }
 
 export function isInlineMediaType(contentType: string | undefined | null): boolean {

@@ -18,7 +18,11 @@ import type { ListBrainEntriesInput, RenewEntryInput } from "./schemas";
 import { listBrainEntriesInput, renewEntryInput } from "./schemas";
 
 /** Audit is post-commit best-effort — a logging failure must not fail the mutation. */
-function audit(db: Database, ctx: TenantContext, action: string, entryId: string): void {
+function audit(
+  db: Database,
+  ctx: TenantContext,
+  { action, id: entryId }: { action: string; id: string },
+): void {
   recordAuditEvent(db, ctx, {
     action,
     targetType: "memory_entry",
@@ -90,7 +94,7 @@ export async function renewBrainEntry(
     if (!row) throw new NotFoundError("MemoryEntry", parsed.entryId);
     return row;
   });
-  audit(db, ctx, "memory_entry.renewed", updated.id);
+  audit(db, ctx, { action: "memory_entry.renewed", id: updated.id });
   return updated;
 }
 
@@ -111,7 +115,7 @@ export async function archiveBrainEntry(
     if (!row) throw new NotFoundError("MemoryEntry", entryId);
     return row;
   });
-  audit(db, ctx, "memory_entry.archived", updated.id);
+  audit(db, ctx, { action: "memory_entry.archived", id: updated.id });
   return updated;
 }
 

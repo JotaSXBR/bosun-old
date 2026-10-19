@@ -154,26 +154,26 @@ export function nextOpeningAt(hours: BusinessHours, timeZone: string, now: Date)
  */
 export function renderOffHoursMessage(
   template: string,
-  next: Date | null,
-  now: Date,
-  timeZone: string,
+  { next, now, timeZone }: { next: Date | null; now: Date; timeZone: string },
 ): string {
-  let label = "em breve";
-  if (next) {
-    const nowParts = zonedParts(now, timeZone);
-    const nextParts = zonedParts(next, timeZone);
-    const here = localDayKey(now, timeZone);
-    const there = localDayKey(next, timeZone);
-    const tomorrowUtc = Date.UTC(nowParts.year, nowParts.month - 1, nowParts.day + 1);
-    const tomorrow = `${tomorrowDate(tomorrowUtc)}`;
-    const hm = `${String(nextParts.hour).padStart(2, "0")}:${String(nextParts.minute).padStart(2, "0")}`;
-    if (there === here) label = `hoje às ${hm}`;
-    else if (there === tomorrow) label = `amanhã às ${hm}`;
-    else {
-      label = `dia ${String(nextParts.day).padStart(2, "0")}/${String(nextParts.month).padStart(2, "0")} às ${hm}`;
-    }
-  }
-  return template.replaceAll("{proximo_atendimento}", label);
+  return template.replaceAll("{proximo_atendimento}", nextOpeningLabel(next, { now, timeZone }));
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+function localTomorrowKey(now: Date, timeZone: string): string {
+  const { year, month, day } = zonedParts(now, timeZone);
+  return tomorrowDate(Date.UTC(year, month - 1, day + 1));
+}
+
+function nextOpeningLabel(next: Date | null, { now, timeZone }: { now: Date; timeZone: string }) {
+  if (!next) return "em breve";
+  const nextParts = zonedParts(next, timeZone);
+  const hm = `${pad2(nextParts.hour)}:${pad2(nextParts.minute)}`;
+  const there = localDayKey(next, timeZone);
+  if (there === localDayKey(now, timeZone)) return `hoje às ${hm}`;
+  if (there === localTomorrowKey(now, timeZone)) return `amanhã às ${hm}`;
+  return `dia ${pad2(nextParts.day)}/${pad2(nextParts.month)} às ${hm}`;
 }
 
 const SYSTEM_MARKER = "off_hours";
@@ -187,8 +187,7 @@ const SYSTEM_MARKER = "off_hours";
 async function reserveMarker(
   executor: DbExecutor,
   conv: ConversationRow,
-  dayKey: string,
-  text: string,
+  { dayKey, text }: { dayKey: string; text: string },
 ): Promise<MessageRow | undefined> {
   const [existing] = await executor
     .select()
@@ -244,6 +243,29 @@ type ReplyPlan =
     }
   | { ok: false; reason: string };
 
+type OrgSettings = Awaited<ReturnType<typeof findSettings>>;
+
+/** The rendered reply and its day key, or the reason no reply is due. */
+function composeReply(
+  settings: OrgSettings,
+  now: Date,
+): { text: string; dayKey: string } | { reason: string } {
+  const template = settings?.offHoursMessage?.trim();
+  if (!template) return { reason: "not-configured" };
+  const timeZone = settings?.timezone ?? "America/Sao_Paulo";
+  // jsonb is untyped at read — malformed hours fall back to "always closed"
+  // instead of poisoning the job's retry loop.
+  const hours: BusinessHours = businessHoursSchema.safeParse(settings?.businessHours).data ?? {
+    windows: {},
+  };
+  if (!isOutsideBusinessHours(hours, timeZone, now)) return { reason: "within-hours" };
+  const next = nextOpeningAt(hours, timeZone, now);
+  return {
+    text: renderOffHoursMessage(template, { next, now, timeZone }),
+    dayKey: localDayKey(now, timeZone),
+  };
+}
+
 /** Loads conv + settings and applies every send gate before any write. */
 async function planReply(
   db: Database,
@@ -256,28 +278,16 @@ async function planReply(
   if (!conv || ["resolved", "closed"].includes(conv.status)) {
     return { ok: false, reason: "no-active-ticket" };
   }
-  const template = settings?.offHoursMessage?.trim();
-  if (!template) return { ok: false, reason: "not-configured" };
-  const timeZone = settings?.timezone ?? "America/Sao_Paulo";
-  // jsonb is untyped at read — malformed hours fall back to "always closed"
-  // instead of poisoning the job's retry loop.
-  const hours: BusinessHours = businessHoursSchema.safeParse(settings?.businessHours).data ?? {
-    windows: {},
-  };
-  if (!isOutsideBusinessHours(hours, timeZone, now)) {
-    return { ok: false, reason: "within-hours" };
-  }
-  const dayKey = localDayKey(now, timeZone);
-  const text = renderOffHoursMessage(template, nextOpeningAt(hours, timeZone, now), now, timeZone);
-  return { ok: true, organizationId: opts.organizationId, conv, text, dayKey, now };
+  const composed = composeReply(settings, now);
+  if ("reason" in composed) return { ok: false, reason: composed.reason };
+  return { ok: true, organizationId: opts.organizationId, conv, ...composed, now };
 }
 
 /** Provider send (outside any tx) + marker update + fan-out event. */
 async function deliverReply(
   db: Database,
   plan: Extract<ReplyPlan, { ok: true }>,
-  marker: MessageRow,
-  deps?: { provider?: ChannelProvider },
+  { marker, deps }: { marker: MessageRow; deps?: { provider?: ChannelProvider } },
 ): Promise<OffHoursResult> {
   const provider =
     deps?.provider ??
@@ -307,9 +317,12 @@ async function deliverReply(
         updatedAt: new Date(),
       })
       .where(sql`${messages.id} = ${marker.id}`);
-    await updateConversationLastMessage(tx, plan.conv.id, plan.now, {
-      direction: "outbound",
-      preview: plan.text,
+    await updateConversationLastMessage(tx, plan.conv.id, {
+      lastMessageAt: plan.now,
+      lastMessage: {
+        direction: "outbound",
+        preview: plan.text,
+      },
     });
     await emitDomainEvent(tx, {
       type: "message.sent",
@@ -331,8 +344,8 @@ export async function maybeSendOffHoursReply(
   const plan = await planReply(db, opts);
   if (!plan.ok) return { sent: false, reason: plan.reason };
   const marker = await withTenant(db, opts.organizationId, (tx) =>
-    reserveMarker(tx, plan.conv, plan.dayKey, plan.text),
+    reserveMarker(tx, plan.conv, { dayKey: plan.dayKey, text: plan.text }),
   );
   if (!marker) return { sent: false, reason: "already-sent-today" };
-  return deliverReply(db, plan, marker, deps);
+  return deliverReply(db, plan, { marker, deps });
 }

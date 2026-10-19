@@ -1,109 +1,91 @@
-# Todo — Google Contacts: sync automático (3b)
+# Todo — Zerar os warnings de ESLint
 
-Plano: `tasks/plan.md`.
+Plano: `tasks/plan.md`. Branch: `chore/lint-warnings`. Um commit por tarefa,
+`chore(lint): ...`. Medir com `pnpm --filter <pkg> lint` (0 warnings da regra).
 
-## Task 1: Consentimento persistido
+## Task 1: Regras triviais, todos os pacotes
 
-- [x] Colunas nullable `external_connections.auto_sync_since` e
-      `last_sweep_at` (schema + migração gerada e revisada)
-- [x] Serviço: marcar o consentimento (idempotente, mantém a data original) e
-      ler "auto-sync ativo" (`connected` + marcador)
-- [x] Desconectar apaga a linha → consentimento some
-- [x] Teste de integração: marcar na org A não habilita a org B
-- **Acceptance**: sem marcador a org não aparece como elegível a sync
-  automático; marcar duas vezes não muda a data
-- **Verify**: `pnpm db:generate` (revisar SQL) · `pnpm db:migrate` ·
-  `pnpm --filter @crm/core test:integration` do módulo
-- **Deps**: nenhuma · **Tamanho**: S
+- [x] `dot-notation` (core 12, ai 1), `prefer-includes` (1), `prefer-nullish-coalescing` (2), `no-unnecessary-condition` (2)
+- [x] `non-nullable-type-assertion-style` (storage 8)
+- [x] `no-empty-function` (~20: testes, showcase, mocks), `vitest/no-conditional-expect` (7)
+- [x] `shadcn/no-inline-styles` (4), `shadcn/require-static-classes` (2)
+- **Acceptance**: essas regras com 0 ocorrências em todos os pacotes; nenhuma mudança de comportamento
+- **Verify**: `pnpm lint` (contagem das regras) · `pnpm typecheck` · `pnpm test`
+- **Deps**: nenhuma · **Tamanho**: M (muitos arquivos, 1–3 linhas cada; dividir em 2 commits se passar de 5 pacotes)
 
-## Task 2: Tentativa gravada + consulta de pendentes
+## Task 2: Pacotes pequenos
 
-- [x] `syncContactToGoogle` grava `lastAttemptAt` em todo término (criou,
-      atualizou, `unchanged`, falhou) sem tocar `updated_at`; sucesso
-      continua limpando `lastError`
-- [x] Repositório: `listPendingGoogleSyncContacts(org, { after, limit })` em
-      SQL — elegível (pré-filtro) E (nunca tentado OU `updated_at` >
-      `coalesce(lastAttemptAt, lastSyncedAt)` OU `lastError` com tentativa > 1 h), ordenado por id
-- [x] Teste de paridade: o pré-filtro SQL e `isEligible` concordam em
-      `@c.us` (7/8/15/16 dígitos), `@lid`, visitante do site, e-mail em
-      branco
-- **Acceptance**: contato `unchanged` deixa de ser pendente; contato com erro
-  recente não aparece, com erro antigo aparece; contato editado aparece
-- **Verify**: `pnpm --filter @crm/core test` · integração
-  `google-contact-sync.int.test.ts` e do repositório
+- [x] `config` (4), `db` (2), `ai` (1 se sobrar), `storage`, `auth` (15), `channels` (17)
+- **Acceptance**: `pnpm --filter @crm/{config,db,ai,storage,auth,channels} lint` sem warnings
+- **Verify**: lint + testes (e integração) de cada pacote tocado
 - **Deps**: 1 · **Tamanho**: M
 
-## Task 3: Varredura ponta a ponta
+## Task 3: `automation`
 
-- [x] Confirmar no pg-boss 12.35.0 (tipos instalados) `schedule` sem payload +
-      `send` avulso na mesma fila; registrar em "Fontes consultadas"
-- [x] Fila `contact-google-sweep`, handler com `organizationId` opcional:
-      lista orgs com auto-sync ativo, pagina os pendentes (cursor por id),
-      `enqueueContactGoogleSync` por contato (cap por execução), grava
-      `last_sweep_at`; erro de uma org não derruba as outras
-- [x] `schedule` a cada 10 min em `boss.ts`
-- [x] `syncGoogleContactsAction`: marca o consentimento e enfileira a
-      varredura da org (remove o laço sequencial da requisição); mantém
-      cooldown e permissão `integrations:manage`
-- [x] Handler e ação testados (org sem consentimento ignorada; conexão
-      `needs_reauth` ignorada; fila indisponível devolve erro claro)
-- **Acceptance**: clicar no botão em staging sincroniza a base inteira sem
-  segurar a requisição; o cron repete sem duplicar contatos no Google
-- **Verify**: `pnpm --filter @crm/automation test` · `pnpm --filter
-@crm/web test` · `pnpm verify`
-- **Deps**: 1, 2 · **Tamanho**: M
+- [x] 22 warnings (`max-statements`, `max-lines-per-function`, `max-params`) nos handlers
+- **Acceptance**: `pnpm --filter @crm/automation lint` limpo; testes dos handlers inalterados
+- **Verify**: `pnpm --filter @crm/automation test` · integração dos jobs tocados
+- **Deps**: 1 · **Tamanho**: M
 
 ### Checkpoint: após a tarefa 3
 
-- [x] `pnpm verify` e integração verdes
-- [x] Staging: botão + varredura sincronizam; segundo tick não cria duplicata
-- [x] Revisar com o humano antes de seguir
+- [ ] `pnpm verify` verde · revisar o diff com o humano
 
-## Task 4: Gatilho nas edições
+## Task 4: `core` — `max-params`
 
-- [x] `createContactAction` e `updateContactProfileAction`, após sucesso,
-      enfileiram `contact-google-sync` quando o auto-sync está ativo
-- [x] Melhor esforço: falha da fila vira `captureException`, a edição segue ok
-- [x] Teste de ação: com consentimento enfileira; sem consentimento não;
-      fila fora do ar não quebra a edição
-- **Acceptance**: editar o cargo de um contato sincronizado atualiza o Google
-  em segundos, sem clicar em nada
-- **Verify**: `pnpm --filter @crm/web test`
-- **Deps**: 1, 3 · **Tamanho**: S
+- [x] 56 em src + 4 em testes: objeto de opções nas assinaturas; chamadores atualizados (web, automation, testes)
+- [x] Fatiar por módulo (≈100 linhas/commit)
+- **Acceptance**: 0 `max-params` em `@crm/core`; `pnpm typecheck` do monorepo verde
+- **Verify**: `pnpm typecheck` · `pnpm --filter @crm/core test` · integração dos módulos tocados
+- **Deps**: 3 · **Tamanho**: L (dividir em commits por módulo)
 
-## Task 5: Card — resumo em SQL, falhas e última varredura
+## Task 5: `core` — `max-statements`, `max-lines-per-function`, `cognitive-complexity`
 
-- [x] Resumo em uma consulta agregada (elegíveis, sincronizados, falhas,
-      última sincronização) no lugar da paginação de todos os contatos
-- [x] `GoogleSyncView` ganha `failed` e `lastSweepAt`; faixa de aviso quando
-      `failed > 0` e linha "última varredura"; textos em `pt-BR.json`
-- [x] Teste de integração do resumo (mesma regra de elegibilidade) e e2e do
-      card (`apps/web/e2e`)
-- **Acceptance**: base com 2 falhas mostra "2 contatos com erro"; a página
-  carrega com uma consulta, não com N páginas
-- **Verify**: `pnpm --filter @crm/core test:integration` · `pnpm --filter
-@crm/web exec playwright test e2e/<arquivo> --reporter=line`
-- **Deps**: 2, 3 · **Tamanho**: M
+- [x] Extrair passos nomeados sem reordenar efeitos (transações, enqueue, auditoria)
+- **Acceptance**: 0 dessas regras em `@crm/core`
+- **Verify**: `pnpm --filter @crm/core test` + integração; revisão atenta do diff em `withTenant`
+- **Deps**: 4 · **Tamanho**: L
 
-### Checkpoint: após a tarefa 5
+## Task 6: `core` — `max-lines`
 
-- [x] `pnpm verify:full` verde
-- [x] Staging: editar contato, criar via ingest, forçar uma falha
-- [x] Revisar com o humano antes de fechar
+- [x] 6 arquivos de produção e 10 de teste divididos por assunto; mesma contagem de casos
+- **Acceptance**: 0 `max-lines` em `@crm/core`; nº de testes igual
+- **Verify**: contagem do vitest antes/depois · `pnpm --filter @crm/core test`
+- **Deps**: 5 · **Tamanho**: M
 
-## Task 6: Higiene
+### Checkpoint: após a tarefa 6
 
-- [x] Cliente People criado uma vez por varredura/handler e reaproveitado
-- [x] Dialog de edição recebe só as chaves do perfil, não `metadata.google`
-- **Acceptance**: `metadata.google` não aparece no payload enviado ao
-  navegador; testes existentes seguem verdes
-- **Verify**: `pnpm --filter @crm/web test` · `pnpm typecheck`
-- **Deps**: 3 · **Tamanho**: S
+- [ ] `pnpm verify:full` verde · `@crm/core` limpo · revisar com o humano
 
-## Task 7: Docs e fechamento
+## Task 7: `design-system`
 
-- [x] `docs/product/contacts-google-sync.md`: seção "Slice 3b — implemented"
-      (consentimento, varredura, backoff, limites restantes)
-- [x] `TODO.md`: slice 3b concluída; Calendar/Gmail seguem como próximos
-- [x] `pnpm verify:full` · review (`code-review-and-quality`) · commit local
-- **Deps**: 1–6 · **Tamanho**: XS
+- [x] 38 warnings (componentes e showcase: `max-lines-per-function`, `max-params`, `no-empty-function`, testes de tokens)
+- **Acceptance**: `pnpm --filter @crm/design-system lint` limpo; `tokens.test.ts` inalterado em cobertura
+- **Verify**: lint · testes do design-system · typecheck do web (consome os componentes)
+- **Deps**: 1 · **Tamanho**: M
+
+## Task 8: `web` — `max-statements`
+
+- [x] ≈53 em actions, route handlers e componentes: extrair helpers nomeados
+- **Acceptance**: 0 `max-statements` em `@crm/web`
+- **Verify**: `pnpm --filter @crm/web test` · typecheck · e2e dos fluxos tocados (Playwright, só texto de pass/fail)
+- **Deps**: 4 · **Tamanho**: L (fatiar por área: actions, api, components)
+
+## Task 9: `web` — `max-lines-per-function`, `max-lines`, `cognitive-complexity`
+
+- [x] ≈80: dividir componentes e arquivos por responsabilidade; mesmo markup/estilos
+- **Acceptance**: `pnpm --filter @crm/web lint` limpo
+- **Verify**: lint · testes · e2e dos fluxos tocados; sem mudar classes de design-system
+- **Deps**: 8 · **Tamanho**: L
+
+### Checkpoint: após a tarefa 9
+
+- [ ] `pnpm lint` 0 warnings no monorepo · `pnpm verify` verde · revisar com o humano
+
+## Task 10: Promover a `error` e fechar
+
+- [x] `tooling/eslint/base.js`: regras zeradas `warn` → `error`
+- [x] `docs/development/code-quality-standard.md` §2.3 e `TODO.md` atualizados
+- **Acceptance**: reintroduzir uma violação quebra o lint
+- **Verify**: `pnpm verify:full` · commit local, PR só a pedido
+- **Deps**: 1–9 · **Tamanho**: S

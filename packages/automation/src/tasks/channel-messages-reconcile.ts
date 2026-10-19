@@ -27,65 +27,91 @@ const MESSAGE_PAGE = 100;
 /** Backfill safety bound per chat per run — dedup makes re-runs cheap. */
 const MAX_MESSAGES_PER_CHAT = 500;
 
+type Totals = { listed: number; ingested: number };
+type BackfillContext = { db: Database; conn: ConnectionRef; provider: ChannelProvider };
+type ChatMessages = Awaited<ReturnType<NonNullable<ChannelProvider["listMessages"]>>>;
+
+/** Backfilling a dead session would query a stopped WAHA session — skip until it reconnects. */
+async function deadSessionReason(provider: ChannelProvider): Promise<string | undefined> {
+  const session = await provider.getSessionInfo?.().catch(() => undefined);
+  return session && session.status !== "connected" ? `session-${session.status}` : undefined;
+}
+
 async function reconcileConnection(
   db: Database,
   connection: ChannelConnectionRow,
-): Promise<{ listed: number; ingested: number; skipped?: string }> {
+): Promise<Totals & { skipped?: string }> {
   const provider = (await resolveConnectionProvider(db, connection.organizationId, connection.id))
     ?.provider;
   if (!provider?.listChats || !provider.listMessages) {
     return { listed: 0, ingested: 0, skipped: "provider-unsupported" };
   }
-  // Backfilling a dead session would query a stopped WAHA session — skip
-  // until it reconnects.
-  const session = await provider.getSessionInfo?.().catch(() => undefined);
-  if (session && session.status !== "connected") {
-    return { listed: 0, ingested: 0, skipped: `session-${session.status}` };
-  }
+  const skipped = await deadSessionReason(provider);
+  if (skipped) return { listed: 0, ingested: 0, skipped };
 
   const conn: ConnectionRef = {
     id: connection.id,
     organizationId: connection.organizationId,
     kind: connection.kind,
   };
-  let listed = 0;
-  let ingested = 0;
-  for (const chat of await provider.listChats({ limit: CHAT_PAGE })) {
-    const result = await backfillChat(db, conn, provider, chat.id);
-    listed += result.listed;
-    ingested += result.ingested;
+  return backfillChats({ db, conn, provider }, await provider.listChats({ limit: CHAT_PAGE }));
+}
+
+async function backfillChats(ctx: BackfillContext, chats: { id: string }[]): Promise<Totals> {
+  const total: Totals = { listed: 0, ingested: 0 };
+  for (const chat of chats) {
+    const result = await backfillChat(ctx, chat.id);
+    total.listed += result.listed;
+    total.ingested += result.ingested;
   }
-  return { listed, ingested };
+  return total;
 }
 
 /** Pages one chat's history into the ingest path (deduped, no fan-out). */
-async function backfillChat(
-  db: Database,
-  conn: ConnectionRef,
-  provider: ChannelProvider,
-  chatId: string,
-): Promise<{ listed: number; ingested: number }> {
-  let listed = 0;
-  let ingested = 0;
+async function backfillChat(ctx: BackfillContext, chatId: string): Promise<Totals> {
+  const total: Totals = { listed: 0, ingested: 0 };
   for (let offset = 0; offset < MAX_MESSAGES_PER_CHAT; offset += MESSAGE_PAGE) {
-    const messages = await provider.listMessages?.(chatId, {
-      limit: MESSAGE_PAGE,
-      offset,
-    });
+    const messages = await ctx.provider.listMessages?.(chatId, { limit: MESSAGE_PAGE, offset });
     if (!messages?.length) break;
-    listed += messages.length;
-    for (const message of messages) {
-      // No enqueue dep on purpose: deduped ingest only. Enqueueing
-      // process-channel-event here would fire off-hours auto-replies for
-      // messages received while the stack was down.
-      const result = await withTenant(db, conn.organizationId, (tx) =>
-        ingestChannelEvent(tx, conn, { type: "message.received", ...message }),
-      );
-      if (result.messageId) ingested += 1;
-    }
+    total.listed += messages.length;
+    total.ingested += await ingestMessages(ctx, messages);
     if (messages.length < MESSAGE_PAGE) break;
   }
-  return { listed, ingested };
+  return total;
+}
+
+async function ingestMessages(ctx: BackfillContext, messages: ChatMessages): Promise<number> {
+  let ingested = 0;
+  for (const message of messages) {
+    // No enqueue dep on purpose: deduped ingest only. Enqueueing
+    // process-channel-event here would fire off-hours auto-replies for
+    // messages received while the stack was down.
+    const result = await withTenant(ctx.db, ctx.conn.organizationId, (tx) =>
+      ingestChannelEvent(tx, ctx.conn, { event: { type: "message.received", ...message } }),
+    );
+    if (result.messageId) ingested += 1;
+  }
+  return ingested;
+}
+
+/**
+ * Targeted runs resolve the row directly (a stale `status` is fine — the
+ * session check inside reconcileConnection skips dead sessions); the
+ * sweep only picks connections persisted as connected.
+ */
+async function connectionsToReconcile(
+  db: Database,
+  parsed: ChannelReconcilePayload,
+): Promise<ChannelConnectionRow[]> {
+  if (!parsed.organizationId || !parsed.channelConnectionId) {
+    return listConnectionsForReconcile(db);
+  }
+  const resolved = await resolveConnectionProvider(
+    db,
+    parsed.organizationId,
+    parsed.channelConnectionId,
+  );
+  return resolved ? [resolved.connection] : [];
 }
 
 /**
@@ -96,26 +122,11 @@ async function backfillChat(
  */
 export async function channelReconcileHandler(
   payload: unknown,
-): Promise<{ connections: number; listed: number; ingested: number }> {
+): Promise<{ connections: number } & Totals> {
   const parsed = channelReconcilePayload.parse(payload);
   const db = getDb();
-  // Targeted runs resolve the row directly (a stale `status` is fine — the
-  // session check inside reconcileConnection skips dead sessions); the
-  // sweep only picks connections persisted as connected.
-  let connections: ChannelConnectionRow[];
-  if (parsed.organizationId && parsed.channelConnectionId) {
-    const resolved = await resolveConnectionProvider(
-      db,
-      parsed.organizationId,
-      parsed.channelConnectionId,
-    );
-    connections = resolved ? [resolved.connection] : [];
-  } else {
-    connections = await listConnectionsForReconcile(db);
-  }
-
-  let listed = 0;
-  let ingested = 0;
+  const connections = await connectionsToReconcile(db, parsed);
+  const total: Totals = { listed: 0, ingested: 0 };
   for (const connection of connections) {
     const result = await reconcileConnection(db, connection).catch((error: unknown) => {
       logger.error("channel reconcile failed", {
@@ -124,8 +135,8 @@ export async function channelReconcileHandler(
       });
       return { listed: 0, ingested: 0 };
     });
-    listed += result.listed;
-    ingested += result.ingested;
+    total.listed += result.listed;
+    total.ingested += result.ingested;
   }
-  return { connections: connections.length, listed, ingested };
+  return { connections: connections.length, ...total };
 }

@@ -23,20 +23,9 @@ export interface AccordionProps {
   className?: string;
 }
 
-export function Accordion({
-  items = [],
-  defaultOpen,
-  multiple = false,
-  className,
-}: AccordionProps) {
-  const fallback = defaultOpen ?? items[0]?.id;
-  const defaultValue = (Array.isArray(fallback) ? fallback : [fallback]).filter(
-    Boolean,
-  ) as string[];
-
-  const itemList = items.map((it) => (
+function AccordionRow({ it }: { it: AccordionItem }) {
+  return (
     <AccordionPrimitive.Item
-      key={it.id}
       value={it.id}
       className="rounded-card-inner duration-base ease-standard data-[state=open]:bg-raised data-[state=open]:shadow-card transition-all"
     >
@@ -64,7 +53,21 @@ export function Accordion({
         <div className="px-4.5 pt-1.5 pb-4.5">{it.content}</div>
       </AccordionPrimitive.Content>
     </AccordionPrimitive.Item>
-  ));
+  );
+}
+
+export function Accordion({
+  items = [],
+  defaultOpen,
+  multiple = false,
+  className,
+}: AccordionProps) {
+  const fallback = defaultOpen ?? items[0]?.id;
+  const defaultValue = (Array.isArray(fallback) ? fallback : [fallback]).filter(
+    Boolean,
+  ) as string[];
+
+  const itemList = items.map((it) => <AccordionRow key={it.id} it={it} />);
 
   const cls = cn("flex flex-col gap-1.5", className);
   return multiple ? (

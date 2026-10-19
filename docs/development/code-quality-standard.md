@@ -224,29 +224,21 @@ preset's error severity (e.g. `consistent-type-assertions`,
 
 ### 2.3 Warning budgets — counts blocking promotion
 
-Every `warn` below is a measured refactoring budget. Promotion rule: when a
-count reaches zero, the severity goes to `error` in the same commit that
-removes it from this table.
+Promotion rule: when a count reaches zero, the severity goes to `error` in
+the same commit that removes it from this table. The 2026-10 lint-warnings
+cleanup (`chore/lint-warnings`) zeroed and promoted every size/complexity
+rule and the defect-adjacent stylistic ones; what is left:
 
-| Rule                                                   | Threshold            | Violations |
-| ------------------------------------------------------ | -------------------- | ---------- |
-| `max-lines-per-function`                               | 50                   | 93         |
-| `max-statements`                                       | 10                   | 68         |
-| `max-params`                                           | 3                    | 53         |
-| `@typescript-eslint/no-empty-function`                 | default              | 16         |
-| `max-lines`                                            | 300                  | 13         |
-| `@typescript-eslint/dot-notation`                      | default              | 13         |
-| `@typescript-eslint/non-nullable-type-assertion-style` | default              | 9          |
-| `vitest/no-conditional-expect`                         | default              | 7          |
-| `@typescript-eslint/no-unnecessary-condition`          | default              | 4          |
-| `sonarjs/cognitive-complexity`                         | 15                   | 2          |
-| `@typescript-eslint/prefer-nullish-coalescing`         | default              | 1          |
-| `@typescript-eslint/prefer-includes`                   | default              | 1          |
-| `playwright/no-useless-not`                            | preset warn          | 1          |
-| `shadcn/no-inline-styles`                              | design-system config | 3          |
-| `shadcn/require-static-classes`                        | design-system config | 1          |
+| Rule                           | Threshold       | Violations |
+| ------------------------------ | --------------- | ---------- |
+| `playwright/no-useless-not`    | preset warn     | 1          |
+| `security/detect-unsafe-regex` | heuristic       | —          |
+| `react/no-multi-comp`          | ignoreStateless | —          |
 
-Promoted to **error** on zero measured violations: `complexity` (20),
+`deal-card.tsx` hands dnd-kit's sortable transform over as the `--drag-transform` CSS variable (class `transform-(--drag-transform)`), so `shadcn/no-inline-styles` reached zero and is `error`. The drag-settle animation now uses the fixed `transition-transform duration-200 ease-out` instead of dnd-kit's own transition string. `security/detect-unsafe-regex` is a heuristic
+and stays a warn by design.
+
+Promoted to **error** on zero measured violations: `max-lines-per-function` (50), `max-statements` (10), `max-params` (3), `max-lines` (300), `sonarjs/cognitive-complexity` (15), `no-empty-function`, `dot-notation`, `non-nullable-type-assertion-style`, `prefer-includes`, `prefer-nullish-coalescing`, `no-unnecessary-condition`, `vitest/no-conditional-expect`, `shadcn/no-inline-styles`, `shadcn/require-static-classes`, plus the earlier set: `complexity` (20),
 `max-depth` (4), `max-nested-callbacks` (10), all of
 `stylisticTypeChecked` except the two off-rules and the warns above, the
 security subset (§1.6), both drizzle where-guards,

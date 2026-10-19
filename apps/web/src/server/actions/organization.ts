@@ -1,6 +1,7 @@
 "use server";
 
 import { enqueueOrganizationOnboarding } from "@crm/automation";
+import type { TenantContext } from "@crm/core";
 import { recordAuditEvent } from "@crm/core/audit";
 import { completeStep } from "@crm/core/onboarding";
 import { getDb } from "@crm/db";
@@ -52,9 +53,9 @@ async function findAvailableSlug(
 async function createOrg(
   auth: Auth,
   requestHeaders: RequestHeaders,
-  name: string,
-  slug: string,
+  input: { name: string; slug: string },
 ): Promise<{ id: string } | null> {
+  const { name, slug } = input;
   try {
     return await auth.api.createOrganization({
       body: { name, slug },
@@ -66,19 +67,42 @@ async function createOrg(
   }
 }
 
-export async function createOrganization(input: unknown): Promise<CreateOrganizationResult> {
-  const parsed = inputSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos" };
+type Session = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;
+
+/** Audit event + activation checklist step. The checklist can never break organization creation. */
+async function recordOrganizationCreated(tenantCtx: TenantContext, orgId: string): Promise<void> {
+  await recordAuditEvent(getDb(), tenantCtx, {
+    action: "organization.created",
+    targetType: "organization",
+    targetId: orgId,
+  });
+
+  // Checklist de ativação nasce endowed: org criada já conta (1/5).
+  try {
+    await completeStep(getDb(), tenantCtx, "org_created");
+  } catch (error) {
+    captureException(error, { action: "organization.checklist" });
   }
+}
 
-  const auth = getAuth();
-  const requestHeaders = await headers();
-  const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) return { ok: false, error: "Sessão expirada. Entre novamente." };
+/** Background onboarding must never break organization creation. */
+async function enqueueOnboarding(organizationId: string, actorUserId: string): Promise<void> {
+  try {
+    await enqueueOrganizationOnboarding({ organizationId, actorUserId });
+  } catch (error) {
+    captureException(error, { action: "organization.enqueueOnboarding" });
+  }
+}
 
-  const slug = await findAvailableSlug(auth, requestHeaders, slugify(parsed.data.name));
-  const org = slug ? await createOrg(auth, requestHeaders, parsed.data.name, slug) : null;
+async function provisionOrganization(input: {
+  auth: Auth;
+  requestHeaders: RequestHeaders;
+  session: Session;
+  name: string;
+}): Promise<CreateOrganizationResult> {
+  const { auth, requestHeaders, session, name } = input;
+  const slug = await findAvailableSlug(auth, requestHeaders, slugify(name));
+  const org = slug ? await createOrg(auth, requestHeaders, { name, slug }) : null;
   if (!org) return { ok: false, error: "Não foi possível criar a organização." };
 
   await auth.api.setActiveOrganization({
@@ -92,30 +116,22 @@ export async function createOrganization(input: unknown): Promise<CreateOrganiza
     role: "owner" as const,
     isPlatformAdmin: session.user.role === "platform_admin",
   };
-
-  await recordAuditEvent(getDb(), tenantCtx, {
-    action: "organization.created",
-    targetType: "organization",
-    targetId: org.id,
-  });
-
-  // Checklist de ativação nasce endowed: org criada já conta (1/5). Nunca
-  // pode quebrar a criação da organização.
-  try {
-    await completeStep(getDb(), tenantCtx, "org_created");
-  } catch (error) {
-    captureException(error, { action: "organization.checklist" });
-  }
-
-  // Background onboarding must never break organization creation.
-  try {
-    await enqueueOrganizationOnboarding({
-      organizationId: org.id,
-      actorUserId: session.user.id,
-    });
-  } catch (error) {
-    captureException(error, { action: "organization.enqueueOnboarding" });
-  }
+  await recordOrganizationCreated(tenantCtx, org.id);
+  await enqueueOnboarding(org.id, session.user.id);
 
   redirect("/app");
+}
+
+export async function createOrganization(input: unknown): Promise<CreateOrganizationResult> {
+  const parsed = inputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos" };
+  }
+
+  const auth = getAuth();
+  const requestHeaders = await headers();
+  const session = await auth.api.getSession({ headers: requestHeaders });
+  if (!session) return { ok: false, error: "Sessão expirada. Entre novamente." };
+
+  return provisionOrganization({ auth, requestHeaders, session, name: parsed.data.name });
 }

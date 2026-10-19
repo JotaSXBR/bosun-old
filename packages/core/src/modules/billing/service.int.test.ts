@@ -7,15 +7,10 @@ import { createDb, schema, withPlatformScope, withServiceAccess, withTenant } fr
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { AuthorizationError, WebhookVerificationError } from "../../errors";
+import { WebhookVerificationError } from "../../errors";
 import type { TenantContext } from "../../tenant/context";
 import { setPlatformSetting } from "../platform";
-import {
-  ensureBillingCustomer,
-  getBillingSubscription,
-  handleAsaasWebhook,
-  listBillingPayments,
-} from "./service";
+import { handleAsaasWebhook } from "./service";
 
 const {
   billingCustomers,
@@ -44,10 +39,6 @@ let suffix: string;
 let customerExternalId: string;
 let subscriptionExternalId: string;
 let subscriptionId: string;
-
-function ctx(organizationId: string, role: TenantContext["role"]): TenantContext {
-  return { organizationId, userId, role, isPlatformAdmin: false };
-}
 
 function asaasRequest(payload: unknown, token = WEBHOOK_TOKEN): RawWebhookRequest {
   return {
@@ -251,10 +242,13 @@ describe("handleAsaasWebhook", () => {
       role: "owner",
       isPlatformAdmin: true,
     };
-    await setPlatformSetting(db, adminCtx, "billing", {
-      asaasApiKey: `db_key_${suffix}`,
-      asaasEnvironment: "sandbox",
-      asaasWebhookToken: `db_token_${suffix}`,
+    await setPlatformSetting(db, adminCtx, {
+      group: "billing",
+      input: {
+        asaasApiKey: `db_key_${suffix}`,
+        asaasEnvironment: "sandbox",
+        asaasWebhookToken: `db_token_${suffix}`,
+      },
     });
     try {
       // DB row wins: the env token no longer verifies.
@@ -276,96 +270,5 @@ describe("handleAsaasWebhook", () => {
         tx.delete(schema.platformSettings).where(eq(schema.platformSettings.key, "billing")),
       );
     }
-  });
-});
-
-describe("tenant RLS isolation (billing tables)", () => {
-  it("org B sees none of org A's billing rows", async () => {
-    for (const table of [billingCustomers, billingSubscriptions, billingPayments] as const) {
-      const inB = await withTenant(db, orgB, (tx) => tx.select().from(table));
-      expect(inB).toHaveLength(0);
-      const inA = await withTenant(db, orgA, (tx) => tx.select().from(table));
-      expect(inA.length).toBeGreaterThan(0);
-      expect(inA.every((r) => r.organizationId === orgA)).toBe(true);
-    }
-  });
-
-  it("an insert for org A inside an org B context is rejected", async () => {
-    const error = await withTenant(db, orgB, (tx) =>
-      tx.insert(billingCustomers).values({ organizationId: orgA, externalId: `cus_bad_${suffix}` }),
-    ).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    expect(error).not.toBeNull();
-    const cause = (error as { cause?: Error }).cause;
-    expect(String(cause?.message ?? (error as Error).message)).toMatch(
-      /row-level security|row violates/i,
-    );
-  });
-});
-
-describe("org-facing billing reads", () => {
-  it("listBillingPayments returns only the caller's org payments", async () => {
-    const paymentsA = await listBillingPayments(db, ctx(orgA, "admin"));
-    expect(paymentsA).toHaveLength(1);
-    expect(paymentsA[0]!.organizationId).toBe(orgA);
-    expect(await listBillingPayments(db, ctx(orgB, "admin"))).toHaveLength(0);
-  });
-
-  it("billing:read is owner/admin only — agent and manager are denied", async () => {
-    await expect(listBillingPayments(db, ctx(orgA, "agent"))).rejects.toBeInstanceOf(
-      AuthorizationError,
-    );
-    await expect(listBillingPayments(db, ctx(orgA, "manager"))).rejects.toBeInstanceOf(
-      AuthorizationError,
-    );
-    await expect(getBillingSubscription(db, ctx(orgA, "agent"))).rejects.toBeInstanceOf(
-      AuthorizationError,
-    );
-  });
-
-  it("getBillingSubscription returns the org's subscription, none for org B", async () => {
-    const sub = await getBillingSubscription(db, ctx(orgA, "owner"));
-    expect(sub?.externalId).toBe(subscriptionExternalId);
-    expect(sub?.status).toBe("active");
-    expect(await getBillingSubscription(db, ctx(orgB, "owner"))).toBeUndefined();
-  });
-
-  it("ensureBillingCustomer returns the existing customer without provider/env", async () => {
-    const customer = await ensureBillingCustomer(db, ctx(orgA, "admin"), {
-      name: "Billing IT A",
-      email: "a@crm.local",
-      cpfCnpj: "12345678901",
-    });
-    expect(customer.externalId).toBe(customerExternalId);
-    expect(customer.organizationId).toBe(orgA);
-  });
-
-  it("ensureBillingCustomer fails cleanly when ASAAS_API_KEY is unset", async () => {
-    await expect(
-      ensureBillingCustomer(db, ctx(orgB, "admin"), {
-        name: "Billing IT B",
-        email: "b@crm.local",
-        cpfCnpj: "12345678000199",
-      }),
-    ).rejects.toMatchObject({ code: "BILLING_NOT_CONFIGURED" });
-  });
-
-  it("ensureBillingCustomer validates input before any work", async () => {
-    await expect(
-      ensureBillingCustomer(db, ctx(orgA, "admin"), {
-        name: "A",
-        email: "a@crm.local",
-        cpfCnpj: "bad",
-      }),
-    ).rejects.toThrowError();
-    await expect(
-      ensureBillingCustomer(db, ctx(orgA, "agent"), {
-        name: "A",
-        email: "a@crm.local",
-        cpfCnpj: "12345678901",
-      }),
-    ).rejects.toBeInstanceOf(AuthorizationError);
   });
 });

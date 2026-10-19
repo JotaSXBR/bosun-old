@@ -37,15 +37,15 @@ function PaletteDemo() {
           {
             label: "Ações",
             items: [
-              { id: "new", icon: "square-check", label: "Criar tarefa", onSelect: () => {} },
-              { id: "flow", icon: "workflow", label: "Nova automação", onSelect: () => {} },
+              { id: "new", icon: "square-check", label: "Criar tarefa", onSelect: () => undefined },
+              { id: "flow", icon: "workflow", label: "Nova automação", onSelect: () => undefined },
             ],
           },
           {
             label: "Módulos",
             items: [
-              { id: "inbox", icon: "inbox", label: "Atendimento", onSelect: () => {} },
-              { id: "deals", icon: "folder-kanban", label: "Negócios", onSelect: () => {} },
+              { id: "inbox", icon: "inbox", label: "Atendimento", onSelect: () => undefined },
+              { id: "deals", icon: "folder-kanban", label: "Negócios", onSelect: () => undefined },
             ],
           },
         ]}
@@ -54,77 +54,116 @@ function PaletteDemo() {
   );
 }
 
-export function Templates() {
-  const [module, setModule] = React.useState("inbox");
+type ModuleState = { module: string; setModule: (id: string) => void };
+
+function TopBarGroup({ module, setModule }: ModuleState) {
+  return (
+    <Group title="AppTopBar">
+      <div className="border-line overflow-hidden rounded-lg border">
+        <AppTopBar
+          modules={MODULES}
+          active={module}
+          onModuleChange={setModule}
+          actions={
+            <>
+              <IconButton icon="search" label="Buscar" />
+              <IconButton icon="bell" label="Notificações" />
+              <UserMenu
+                name="Marina Costa"
+                email="marina@costa.studio"
+                items={[
+                  { icon: "settings", label: "Configurações" },
+                  { icon: "users", label: "Equipe" },
+                  { icon: "log-out", label: "Sair" },
+                ]}
+              />
+            </>
+          }
+        />
+      </div>
+    </Group>
+  );
+}
+
+function PageHeaderGroup() {
   const [filters, setFilters] = React.useState(["Fila A", "Esta semana"]);
   return (
-    <Section title="Templates">
-      <Group title="AppTopBar">
-        <div className="border-line overflow-hidden rounded-lg border">
-          <AppTopBar
-            modules={MODULES}
-            active={module}
-            onModuleChange={setModule}
-            actions={
-              <>
-                <IconButton icon="search" label="Buscar" />
-                <IconButton icon="bell" label="Notificações" />
-                <UserMenu
-                  name="Marina Costa"
-                  email="marina@costa.studio"
-                  items={[
-                    { icon: "settings", label: "Configurações" },
-                    { icon: "users", label: "Equipe" },
-                    { icon: "log-out", label: "Sair" },
-                  ]}
-                />
-              </>
-            }
-          />
-        </div>
-      </Group>
-      <Group title="PageHeader">
-        <PageHeader
-          title="Atendimento"
-          tabs={["Todos", "Aguardando", "Resolvidos"]}
-          filters={filters}
-          onRemoveFilter={(f) => setFilters((cur) => cur.filter((x) => x !== f))}
-          right={<IconButton icon="list-filter" label="Filtros" />}
-        />
-        <PageHeader
-          compact
-          title="Atendimento"
-          tabs={["Fila", "Minhas", "Adiados", "Fechadas"]}
-          right={<IconButton icon="list-filter" label="Filtros" />}
-        />
-        <PageHeader
-          compact
-          back={{ href: "#", label: "Voltar para Configurações" }}
-          title="Detalhe da conexão"
-        />
-      </Group>
-      <Group title="AppShell">
-        <div className="border-line overflow-hidden rounded-lg border">
-          <AppShell
-            className="h-160"
-            topBar={<AppTopBar modules={MODULES} active={module} onModuleChange={setModule} />}
-            header={<PageHeader compact title="Atendimento" tabs={["Fila", "Minhas", "Adiados"]} />}
-          >
-            <div className="flex h-full">
-              <div className="w-inbox-list border-line space-y-3 overflow-y-auto border-r p-4">
-                {Array.from({ length: 12 }, (_, i) => (
-                  <div key={i} className="bg-surface rounded-card h-16" />
-                ))}
-              </div>
-              <div className="flex-1 space-y-3 overflow-y-auto p-4">
-                {Array.from({ length: 10 }, (_, i) => (
-                  <div key={i} className="bg-surface max-w-thread rounded-card h-20" />
-                ))}
-              </div>
+    <Group title="PageHeader">
+      <PageHeader
+        title="Atendimento"
+        tabs={["Todos", "Aguardando", "Resolvidos"]}
+        filters={filters}
+        onRemoveFilter={(f) => setFilters((cur) => cur.filter((x) => x !== f))}
+        right={<IconButton icon="list-filter" label="Filtros" />}
+      />
+      <PageHeader
+        compact
+        title="Atendimento"
+        tabs={["Fila", "Minhas", "Adiados", "Fechadas"]}
+        right={<IconButton icon="list-filter" label="Filtros" />}
+      />
+      <PageHeader
+        compact
+        back={{ href: "#", label: "Voltar para Configurações" }}
+        title="Detalhe da conexão"
+      />
+    </Group>
+  );
+}
+
+function ShellGroup({ module, setModule }: ModuleState) {
+  return (
+    <Group title="AppShell">
+      <div className="border-line overflow-hidden rounded-lg border">
+        <AppShell
+          className="h-160"
+          topBar={<AppTopBar modules={MODULES} active={module} onModuleChange={setModule} />}
+          header={<PageHeader compact title="Atendimento" tabs={["Fila", "Minhas", "Adiados"]} />}
+        >
+          <div className="flex h-full">
+            <div className="w-inbox-list border-line space-y-3 overflow-y-auto border-r p-4">
+              {Array.from({ length: 12 }, (_, i) => (
+                <div key={i} className="bg-surface rounded-card h-16" />
+              ))}
             </div>
-          </AppShell>
-        </div>
-      </Group>
+            <div className="flex-1 space-y-3 overflow-y-auto p-4">
+              {Array.from({ length: 10 }, (_, i) => (
+                <div key={i} className="bg-surface max-w-thread rounded-card h-20" />
+              ))}
+            </div>
+          </div>
+        </AppShell>
+      </div>
+    </Group>
+  );
+}
+
+function AuthGroup() {
+  return (
+    <Group title="AuthLayout">
+      <div className="border-line h-160 overflow-hidden overflow-y-auto rounded-lg border">
+        <AuthLayout>
+          <div className="flex flex-col gap-4">
+            <h1 className="font-display text-h2 text-ink-strong font-semibold">Entrar na BOSUN</h1>
+            <Input shape="rounded" size="lg" label="E-mail" icon="at-sign" />
+            <Input shape="rounded" size="lg" label="Senha" type="password" icon="lock" />
+            <Button variant="primary" size="lg" fullWidth>
+              Entrar
+            </Button>
+          </div>
+        </AuthLayout>
+      </div>
+    </Group>
+  );
+}
+
+export function Templates() {
+  const [module, setModule] = React.useState("inbox");
+  return (
+    <Section title="Templates">
+      <TopBarGroup module={module} setModule={setModule} />
+      <PageHeaderGroup />
+      <ShellGroup module={module} setModule={setModule} />
       <Group title="CommandPalette">
         <PaletteDemo />
       </Group>
@@ -136,22 +175,7 @@ export function Templates() {
           action={<Button iconLeft="refresh-cw">Atualizar</Button>}
         />
       </Group>
-      <Group title="AuthLayout">
-        <div className="border-line h-160 overflow-hidden overflow-y-auto rounded-lg border">
-          <AuthLayout>
-            <div className="flex flex-col gap-4">
-              <h1 className="font-display text-h2 text-ink-strong font-semibold">
-                Entrar na BOSUN
-              </h1>
-              <Input shape="rounded" size="lg" label="E-mail" icon="at-sign" />
-              <Input shape="rounded" size="lg" label="Senha" type="password" icon="lock" />
-              <Button variant="primary" size="lg" fullWidth>
-                Entrar
-              </Button>
-            </div>
-          </AuthLayout>
-        </div>
-      </Group>
+      <AuthGroup />
     </Section>
   );
 }

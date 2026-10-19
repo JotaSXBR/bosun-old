@@ -8,7 +8,6 @@ import { DomainError, NotFoundError } from "../../errors";
 import { isUniqueViolation } from "../../lib/pg-error";
 import type { TenantContext } from "../../tenant/context";
 import { assertPermission } from "../../tenant/context";
-import { findOrCreateAgentByKind } from "../agents";
 import { recordAuditEvent } from "../audit";
 import { sendOutboundMessage } from "../messaging";
 import type { AgentSuggestionRow } from "../suggestions";
@@ -25,7 +24,11 @@ import type { DraftPayload, ReviewNudgeInput } from "./schemas";
 import { draftPayloadSchema, requestDraftInput, reviewNudgeInput } from "./schemas";
 
 /** Audit is post-commit best-effort — a logging failure must not fail the mutation. */
-function audit(db: Database, ctx: TenantContext, action: string, suggestionId: string): void {
+function audit(
+  db: Database,
+  ctx: TenantContext,
+  { action, id: suggestionId }: { action: string; id: string },
+): void {
   recordAuditEvent(db, ctx, {
     action,
     targetType: "agent_suggestion",
@@ -216,8 +219,66 @@ export async function reviewNudge(
     });
     return row;
   });
-  audit(db, ctx, `agent_nudge.${action}`, suggestionId);
+  audit(db, ctx, { action: `agent_nudge.${action}`, id: suggestionId });
   return reviewed;
+}
+
+type ApprovalDraft = { approved: AgentSuggestionRow } | { body: string; conversationId: string };
+
+/** Reads the draft and refuses anything that is not sendable; an already-approved one short-circuits. */
+async function readDraftForApproval(
+  db: Database,
+  ctx: TenantContext,
+  suggestionId: string,
+): Promise<ApprovalDraft> {
+  const suggestion = assertDraftRow(
+    await withTenant(db, ctx.organizationId, (tx) =>
+      findSuggestionById(tx, ctx.organizationId, suggestionId),
+    ),
+  );
+  if (suggestion.status === "approved") return { approved: suggestion };
+  if (suggestion.status !== "pending") {
+    throw new DomainError("DRAFT_ALREADY_REVIEWED", suggestion.status);
+  }
+  const { body } = draftPayloadSchema.parse(suggestion.payload);
+  const conversationId = suggestion.sourceConversationId;
+  if (!conversationId) {
+    throw new DomainError("DRAFT_NO_CONVERSATION", "draft has no source conversation");
+  }
+  return { body, conversationId };
+}
+
+/** Sends the claimed draft; a failed send releases the claim so the draft stays pending. */
+async function sendClaimedDraft(
+  db: Database,
+  ctx: TenantContext,
+  {
+    suggestionId,
+    conversationId,
+    body,
+    deps,
+  }: {
+    suggestionId: string;
+    conversationId: string;
+    body: string;
+    deps?: { provider?: ChannelProvider };
+  },
+): Promise<void> {
+  try {
+    // Sends outside the review tx — provider latency must not hold row
+    // locks. `automated` → anti-ban envelope (the body is AI-generated).
+    await sendOutboundMessage(db, ctx, {
+      input: { conversationId, text: body },
+      deps: { ...deps, automated: true },
+    });
+  } catch (error) {
+    // Release the claim so a failed send leaves the draft pending.
+    await withTenant(db, ctx.organizationId, (tx) => releaseDraftClaim(tx, suggestionId)).catch(
+      (releaseError: unknown) =>
+        captureException(releaseError, { module: "drafts", action: "releaseDraftClaim" }),
+    );
+    throw error;
+  }
 }
 
 /**
@@ -228,24 +289,11 @@ export async function reviewNudge(
 export async function approveDraft(
   db: Database,
   ctx: TenantContext,
-  suggestionId: string,
-  deps?: { provider?: ChannelProvider },
+  { suggestionId, deps }: { suggestionId: string; deps?: { provider?: ChannelProvider } },
 ): Promise<AgentSuggestionRow> {
   assertPermission(ctx, { messaging: ["write"] });
-  const suggestion = assertDraftRow(
-    await withTenant(db, ctx.organizationId, (tx) =>
-      findSuggestionById(tx, ctx.organizationId, suggestionId),
-    ),
-  );
-  if (suggestion.status === "approved") return suggestion;
-  if (suggestion.status !== "pending") {
-    throw new DomainError("DRAFT_ALREADY_REVIEWED", suggestion.status);
-  }
-  const { body } = draftPayloadSchema.parse(suggestion.payload);
-  const conversationId = suggestion.sourceConversationId;
-  if (!conversationId) {
-    throw new DomainError("DRAFT_NO_CONVERSATION", "draft has no source conversation");
-  }
+  const draft = await readDraftForApproval(db, ctx, suggestionId);
+  if ("approved" in draft) return draft.approved;
   // Atomic claim — a concurrent approve that lands after this update gets
   // zero rows back, so the same draft can never be sent twice.
   const claimed = await withTenant(db, ctx.organizationId, (tx) =>
@@ -254,33 +302,17 @@ export async function approveDraft(
   // Another approve may have won the race between our status check and
   // the claim — return its outcome instead of sending again.
   if (!claimed) return reviewedDraftState(db, ctx, suggestionId);
-  try {
-    // Sends outside the review tx — provider latency must not hold row
-    // locks. `automated` → anti-ban envelope (the body is AI-generated).
-    await sendOutboundMessage(
-      db,
-      ctx,
-      { conversationId, text: body },
-      { ...deps, automated: true },
-    );
-  } catch (error) {
-    // Release the claim so a failed send leaves the draft pending.
-    await withTenant(db, ctx.organizationId, (tx) => releaseDraftClaim(tx, suggestionId)).catch(
-      (releaseError: unknown) =>
-        captureException(releaseError, { module: "drafts", action: "releaseDraftClaim" }),
-    );
-    throw error;
-  }
+  await sendClaimedDraft(db, ctx, { suggestionId, ...draft, deps });
   await withTenant(db, ctx.organizationId, (tx) =>
     emitDomainEvent(tx, {
       type: "agent_suggestion.reviewed",
       organizationId: ctx.organizationId,
       suggestionId,
-      conversationId,
+      conversationId: draft.conversationId,
       targetType: DRAFT_TARGET_TYPE,
     }),
   );
-  audit(db, ctx, "agent_draft.approved", suggestionId);
+  audit(db, ctx, { action: "agent_draft.approved", id: suggestionId });
   return claimed;
 }
 
@@ -313,45 +345,11 @@ export async function rejectDraft(
     });
     return row;
   });
-  audit(db, ctx, "agent_draft.rejected", suggestionId);
+  audit(db, ctx, { action: "agent_draft.rejected", id: suggestionId });
   return reviewed;
 }
 
-/**
- * The org's drafter — dedicated `kind='drafter'` agent row, lazily created
- * on first use with a sane default persona; editable afterwards through
- * the regular agents settings UI (`ai:manage`).
- */
-export async function findOrCreateDrafter(db: Database, organizationId: string) {
-  return withTenant(db, organizationId, (tx) =>
-    findOrCreateAgentByKind(tx, organizationId, "drafter", {
-      name: "Drafter",
-      specialty: "Sugestões de resposta para revisão humana",
-      status: "active",
-      systemPrompt:
-        "Você escreve rascunhos de resposta no tom da empresa: cordial, direto, " +
-        "sem jargão técnico com o cliente. Trate o cliente por 'você'.",
-      toolsAllowlist: [],
-    }),
-  );
-}
-
-/**
- * The org's observer — dedicated `kind='observer'` agent row, lazily
- * created on first analysis. Owner-only editable (system agent gate in
- * agents/service.ts); its `systemPrompt`/`modelRef` steer the job.
- */
-export async function findOrCreateObserver(db: Database, organizationId: string) {
-  return withTenant(db, organizationId, (tx) =>
-    findOrCreateAgentByKind(tx, organizationId, "observer", {
-      name: "Observer",
-      specialty: "Análise pós-atendimento e aprendizado operacional",
-      status: "active",
-      systemPrompt: "",
-      toolsAllowlist: [],
-    }),
-  );
-}
+export { findOrCreateDrafter, findOrCreateObserver } from "./system-agents";
 
 /** Validates a composer-side draft request (enqueue boundary). */
 export function parseDraftRequest(input: unknown): z.output<typeof requestDraftInput> {

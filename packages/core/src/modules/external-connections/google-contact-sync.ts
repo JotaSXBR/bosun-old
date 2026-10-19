@@ -62,10 +62,17 @@ const rejectsCredentials = (error: unknown): error is GooglePeopleError =>
 /** Creates, or updates with the etag; on a conflict rereads once and retries. */
 async function push(
   people: GooglePeopleClient,
-  accessToken: string,
-  person: GooglePersonInput,
-  current: GooglePerson | null,
-  ours: boolean,
+  {
+    accessToken,
+    person,
+    current,
+    ours,
+  }: {
+    accessToken: string;
+    person: GooglePersonInput;
+    current: GooglePerson | null;
+    ours: boolean;
+  },
 ): Promise<GooglePerson> {
   if (!current) return people.createContact({ accessToken, person });
   // A contact we already mirror gets the full mask, so a field emptied in
@@ -83,6 +90,85 @@ async function push(
   }
 }
 
+type SyncDeps = { oauth?: GoogleOAuthClient; people?: GooglePeopleClient };
+
+type SyncRun = {
+  db: Database;
+  organizationId: string;
+  contactId: string;
+  attemptedAt: string;
+  mirror: MirrorState;
+  person: GooglePersonInput;
+  hash: string;
+  deps: SyncDeps;
+};
+
+/** `lastAttemptAt` lets the sweep tell "checked, nothing to send" from "never tried". */
+const saveMirror = (run: SyncRun, google: Record<string, unknown>) =>
+  withTenant(run.db, run.organizationId, (tx) =>
+    updateContactGoogleSync(tx, run.organizationId, {
+      contactId: run.contactId,
+      google: { ...google, lastAttemptAt: run.attemptedAt },
+    }),
+  );
+
+/** Null when there is nothing to send: consent gone, contact missing/foreign or not eligible. */
+async function prepareRun(
+  db: Database,
+  { organizationId, contactId }: { organizationId: string; contactId: string },
+  deps: SyncDeps,
+): Promise<SyncRun | null> {
+  // Consent is re-checked here: a job queued before a disconnect/reconnect must not send.
+  if (!(await isGoogleAutoSyncActive(db, organizationId))) return null;
+  // Taken before the read: an edit landing mid-sync keeps `updated_at` newer than this.
+  const attemptedAt = new Date().toISOString();
+  const contact = await withTenant(db, organizationId, (tx) => findContactById(tx, contactId));
+  if (contact?.organizationId !== organizationId || !isEligible(contact)) return null;
+  // Corrupted jsonb is treated as "never synced" instead of crashing the job.
+  const mirror: MirrorState = mirrorSchema.catch({}).parse(contact.metadata.google ?? {});
+  const person = toPerson(contact);
+  const hash = payloadHash(person);
+  return { db, organizationId, contactId, attemptedAt, mirror, person, hash, deps };
+}
+
+async function saveUnchanged(run: SyncRun): Promise<GoogleSyncOutcome> {
+  const { lastError: _cleared, ...rest } = run.mirror;
+  await saveMirror(run, rest);
+  return "unchanged";
+}
+
+/** Reuses the stored resource, else adopts an exact match, else creates. */
+async function pushToGoogle(run: SyncRun): Promise<GoogleSyncOutcome> {
+  const token = await getGoogleAccessToken(run.db, run.organizationId, run.deps.oauth);
+  if (!token) return "skipped";
+  const { accessToken } = token;
+  const people = run.deps.people ?? createGooglePeopleClient();
+  const { resourceName } = run.mirror;
+  const known = resourceName ? await people.getContact({ accessToken, resourceName }) : null;
+  const current = known ?? (await findCandidate(people, accessToken, run.person));
+  const saved = await push(people, {
+    accessToken,
+    person: run.person,
+    current,
+    ours: known !== null,
+  });
+  await saveMirror(run, {
+    resourceName: saved.resourceName,
+    etag: saved.source?.etag ?? null,
+    payloadHash: run.hash,
+    lastSyncedAt: new Date().toISOString(),
+  });
+  return current ? "updated" : "created";
+}
+
+async function recordFailure(run: SyncRun, error: unknown): Promise<GoogleSyncOutcome> {
+  if (!(error instanceof GooglePeopleError || error instanceof GoogleOAuthError)) throw error;
+  await saveMirror(run, { ...run.mirror, lastError: error.code });
+  if (rejectsCredentials(error))
+    await markGoogleNeedsReauth(run.db, run.organizationId, error.code);
+  return "failed";
+}
+
 /**
  * Internal — trusted system path (the sync job), no role check. Mirrors one
  * contact into the org's connected Google account: reuses the stored
@@ -93,58 +179,14 @@ async function push(
 export async function syncContactToGoogle(
   db: Database,
   input: { organizationId: string; contactId: string },
-  deps: { oauth?: GoogleOAuthClient; people?: GooglePeopleClient } = {},
+  deps: SyncDeps = {},
 ): Promise<GoogleSyncOutcome> {
-  const { organizationId, contactId } = input;
-  // Consent is re-checked here: a job queued before a disconnect/reconnect must not send.
-  if (!(await isGoogleAutoSyncActive(db, organizationId))) return "skipped";
-  // Taken before the read: an edit landing mid-sync keeps `updated_at` newer than this.
-  const attemptedAt = new Date().toISOString();
-  const contact = await withTenant(db, organizationId, (tx) => findContactById(tx, contactId));
-  if (contact?.organizationId !== organizationId || !isEligible(contact)) return "skipped";
-
-  // Corrupted jsonb is treated as "never synced" instead of crashing the job.
-  const mirror: MirrorState = mirrorSchema.catch({}).parse(contact.metadata.google ?? {});
-  const person = toPerson(contact);
-  const hash = payloadHash(person);
-  // `lastAttemptAt` lets the sweep tell "checked, nothing to send" from "never tried".
-  const save = (google: Record<string, unknown>) =>
-    withTenant(db, organizationId, (tx) =>
-      updateContactGoogleSync(tx, organizationId, contactId, {
-        ...google,
-        lastAttemptAt: attemptedAt,
-      }),
-    );
-
-  if (mirror.resourceName && mirror.payloadHash === hash) {
-    const { lastError: _cleared, ...rest } = mirror;
-    await save(rest);
-    return "unchanged";
-  }
-
+  const run = await prepareRun(db, input, deps);
+  if (!run) return "skipped";
+  if (run.mirror.resourceName && run.mirror.payloadHash === run.hash) return saveUnchanged(run);
   try {
-    const token = await getGoogleAccessToken(db, organizationId, deps.oauth);
-    if (!token) return "skipped";
-    const { accessToken } = token;
-    const people = deps.people ?? createGooglePeopleClient();
-
-    const known = mirror.resourceName
-      ? await people.getContact({ accessToken, resourceName: mirror.resourceName })
-      : null;
-    const current = known ?? (await findCandidate(people, accessToken, person));
-
-    const saved = await push(people, accessToken, person, current, known !== null);
-    await save({
-      resourceName: saved.resourceName,
-      etag: saved.source?.etag ?? null,
-      payloadHash: hash,
-      lastSyncedAt: new Date().toISOString(),
-    });
-    return current ? "updated" : "created";
+    return await pushToGoogle(run);
   } catch (error) {
-    if (!(error instanceof GooglePeopleError || error instanceof GoogleOAuthError)) throw error;
-    await save({ ...mirror, lastError: error.code });
-    if (rejectsCredentials(error)) await markGoogleNeedsReauth(db, organizationId, error.code);
-    return "failed";
+    return recordFailure(run, error);
   }
 }

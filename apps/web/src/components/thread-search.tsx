@@ -11,11 +11,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { searchMessagesAction } from "@/server/actions/messaging";
 
-export function ThreadSearch({ conversationId }: { conversationId: string }) {
-  const t = useTranslations("inbox");
-  const format = useFormatter();
-  const router = useRouter();
-  const searchParams = useSearchParams();
+/** Debounced search plus open/close state of the hit dropdown (closed on outside click). */
+function useThreadSearch(conversationId: string) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<MessageSearchHit[] | null>(null);
   const [open, setOpen] = useState(false);
@@ -46,6 +43,57 @@ export function ThreadSearch({ conversationId }: { conversationId: string }) {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
+  return { query, setQuery, hits, setHits, open, setOpen, boxRef };
+}
+
+function SearchResults({
+  hits,
+  onPick,
+}: {
+  hits: MessageSearchHit[];
+  onPick: (hit: MessageSearchHit) => void;
+}) {
+  const t = useTranslations("inbox");
+  const format = useFormatter();
+  return (
+    <div
+      className="bg-raised text-ink shadow-raised absolute top-full right-0 z-20 mt-1 w-72 overflow-hidden rounded-md border"
+      data-testid="thread-search-results"
+    >
+      {hits.length === 0 ? (
+        <p className="text-ink-muted px-3 py-2 text-xs">{t("searchNoResults")}</p>
+      ) : (
+        <ul>
+          {hits.map((hit) => (
+            <li key={hit.id}>
+              <button
+                type="button"
+                className="hover:bg-page block w-full px-3 py-2 text-left"
+                onClick={() => onPick(hit)}
+              >
+                <span className="text-ink-subtle block text-xs">
+                  {format.dateTime(hit.sentAt ?? hit.createdAt, {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                  })}
+                  {" · "}
+                  {hit.direction === "outbound" ? t("searchOutbound") : t("searchInbound")}
+                </span>
+                <span className="line-clamp-2 text-xs">{hit.preview ?? "…"}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export function ThreadSearch({ conversationId }: { conversationId: string }) {
+  const t = useTranslations("inbox");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { query, setQuery, hits, setHits, open, setOpen, boxRef } = useThreadSearch(conversationId);
 
   const jumpTo = (hit: MessageSearchHit) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -76,38 +124,7 @@ export function ThreadSearch({ conversationId }: { conversationId: string }) {
         className="border-line bg-page text-ink placeholder:text-ink-subtle focus:border-line-accent w-44 rounded-md border py-1 pr-2 pl-7 text-xs outline-none"
         data-testid="thread-search"
       />
-      {open && hits !== null && (
-        <div
-          className="bg-raised text-ink shadow-raised absolute top-full right-0 z-20 mt-1 w-72 overflow-hidden rounded-md border"
-          data-testid="thread-search-results"
-        >
-          {hits.length === 0 ? (
-            <p className="text-ink-muted px-3 py-2 text-xs">{t("searchNoResults")}</p>
-          ) : (
-            <ul>
-              {hits.map((hit) => (
-                <li key={hit.id}>
-                  <button
-                    type="button"
-                    className="hover:bg-page block w-full px-3 py-2 text-left"
-                    onClick={() => jumpTo(hit)}
-                  >
-                    <span className="text-ink-subtle block text-xs">
-                      {format.dateTime(hit.sentAt ?? hit.createdAt, {
-                        dateStyle: "short",
-                        timeStyle: "short",
-                      })}
-                      {" · "}
-                      {hit.direction === "outbound" ? t("searchOutbound") : t("searchInbound")}
-                    </span>
-                    <span className="line-clamp-2 text-xs">{hit.preview ?? "…"}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+      {open && hits !== null && <SearchResults hits={hits} onPick={jumpTo} />}
     </div>
   );
 }

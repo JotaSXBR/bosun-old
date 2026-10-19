@@ -29,19 +29,11 @@ interface LabelPickerProps {
   triggerLabel?: string;
 }
 
-/**
- * Checkbox dropdown to apply org labels, with inline create for users with
- * leads:manage. The parent owns persistence via `onSave`.
- */
-export function LabelPicker({
-  allLabels,
-  selectedIds,
-  canCreate,
-  onSave,
-  triggerLabel,
-}: LabelPickerProps) {
+type OnSave = LabelPickerProps["onSave"];
+
+/** Selection state, optimistic toggle and inline label creation. */
+function useLabelSelection(selectedIds: string[], onSave: OnSave) {
   const t = useTranslations("leads");
-  const [open, setOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState<PaletteColor>("gray");
   const [selected, setSelected] = useState<string[]>(selectedIds);
@@ -76,6 +68,70 @@ export function LabelPicker({
       }
     });
   }
+  return { newName, setNewName, newColor, setNewColor, selected, pending, toggle, createLabel };
+}
+
+type LabelSelection = ReturnType<typeof useLabelSelection>;
+
+function NewLabelForm({ state }: { state: LabelSelection }) {
+  const t = useTranslations("leads");
+  const { newName, setNewName, newColor, setNewColor, pending, createLabel } = state;
+  return (
+    <div className="space-y-2 p-2" onKeyDown={(e) => e.stopPropagation()}>
+      <Input
+        shape="rounded"
+        value={newName}
+        onChange={(e) => setNewName(e.target.value)}
+        placeholder={t("newLabelPlaceholder")}
+        className="h-8 text-sm"
+        maxLength={40}
+      />
+      <div className="flex flex-wrap gap-1">
+        {COLOR_PALETTE.map((color) => (
+          <button
+            key={color}
+            type="button"
+            aria-label={color}
+            onClick={() => setNewColor(color)}
+            className={cn(
+              "flex size-5 items-center justify-center rounded-full",
+              paletteStyle(color).dot,
+            )}
+          >
+            {newColor === color && <CheckIcon className="size-3 text-white" />}
+          </button>
+        ))}
+      </div>
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        iconLeft="plus"
+        className="w-full"
+        disabled={!newName.trim() || pending}
+        onClick={createLabel}
+      >
+        {t("createLabel")}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Checkbox dropdown to apply org labels, with inline create for users with
+ * leads:manage. The parent owns persistence via `onSave`.
+ */
+export function LabelPicker({
+  allLabels,
+  selectedIds,
+  canCreate,
+  onSave,
+  triggerLabel,
+}: LabelPickerProps) {
+  const t = useTranslations("leads");
+  const [open, setOpen] = useState(false);
+  const state = useLabelSelection(selectedIds, onSave);
+  const { selected, pending, toggle } = state;
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -86,63 +142,24 @@ export function LabelPicker({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
-        {allLabels.map((label) => {
-          const style = paletteStyle(label.color);
-          return (
-            <DropdownMenuCheckboxItem
-              key={label.id}
-              checked={selected.includes(label.id)}
-              onCheckedChange={(checked) => toggle(label.id, checked === true)}
-              onSelect={(e) => e.preventDefault()}
-            >
-              <span className={cn("size-2 rounded-full", style.dot)} />
-              {label.name}
-            </DropdownMenuCheckboxItem>
-          );
-        })}
+        {allLabels.map((label) => (
+          <DropdownMenuCheckboxItem
+            key={label.id}
+            checked={selected.includes(label.id)}
+            onCheckedChange={(checked) => toggle(label.id, checked === true)}
+            onSelect={(e) => e.preventDefault()}
+          >
+            <span className={cn("size-2 rounded-full", paletteStyle(label.color).dot)} />
+            {label.name}
+          </DropdownMenuCheckboxItem>
+        ))}
         {allLabels.length === 0 && !canCreate && (
           <p className="text-ink-muted px-2 py-1.5 text-xs">{t("noLabels")}</p>
         )}
         {canCreate && (
           <>
             <DropdownMenuSeparator />
-            <div className="space-y-2 p-2" onKeyDown={(e) => e.stopPropagation()}>
-              <Input
-                shape="rounded"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder={t("newLabelPlaceholder")}
-                className="h-8 text-sm"
-                maxLength={40}
-              />
-              <div className="flex flex-wrap gap-1">
-                {COLOR_PALETTE.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    aria-label={color}
-                    onClick={() => setNewColor(color)}
-                    className={cn(
-                      "flex size-5 items-center justify-center rounded-full",
-                      paletteStyle(color).dot,
-                    )}
-                  >
-                    {newColor === color && <CheckIcon className="size-3 text-white" />}
-                  </button>
-                ))}
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                iconLeft="plus"
-                className="w-full"
-                disabled={!newName.trim() || pending}
-                onClick={createLabel}
-              >
-                {t("createLabel")}
-              </Button>
-            </div>
+            <NewLabelForm state={state} />
           </>
         )}
       </DropdownMenuContent>

@@ -23,15 +23,9 @@ import { PairingPanel } from "./pairing-panel";
 
 type QrCode = { mimeType: string; data: string };
 
-export function ConnectionActions({
-  id,
-  kind,
-  status,
-}: {
-  id: string;
-  kind: string;
-  status: string;
-}) {
+type Lifecycle = "stop" | "restart" | "logout";
+
+function useConnectionActions(id: string, kind: string) {
   const t = useTranslations("integrations");
   const [pending, startTransition] = useTransition();
   const [pairing, setPairing] = useState<{ qr?: QrCode } | null>(null);
@@ -55,7 +49,7 @@ export function ConnectionActions({
     });
   }
 
-  function lifecycle(action: "stop" | "restart" | "logout", label: string) {
+  function lifecycle(action: Lifecycle, label: string) {
     startTransition(async () => {
       const result = await connectionLifecycleAction(id, action);
       if (!result.ok) {
@@ -75,9 +69,77 @@ export function ConnectionActions({
     });
   }
 
+  return { pending, pairing, setPairing, connect, lifecycle, remove };
+}
+
+function ActionsMenu({
+  pending,
+  wahaActive,
+  hasLifecycle,
+  lifecycle,
+  remove,
+}: {
+  pending: boolean;
+  wahaActive: boolean;
+  hasLifecycle: boolean;
+  lifecycle: (action: Lifecycle, label: string) => void;
+  remove: () => void;
+}) {
+  const t = useTranslations("integrations");
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <IconButton icon="ellipsis-vertical" label={t("actions.more")} disabled={pending} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {hasLifecycle && (
+          <>
+            <DropdownMenuItem
+              onSelect={() =>
+                lifecycle(
+                  "restart",
+                  wahaActive ? t("actions.sessionRestarted") : t("actions.sessionRestartedQr"),
+                )
+              }
+            >
+              {t("actions.restart")}
+            </DropdownMenuItem>
+            {wahaActive && (
+              <DropdownMenuItem onSelect={() => lifecycle("stop", t("actions.sessionStopped"))}>
+                {t("actions.stop")}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onSelect={() => lifecycle("logout", t("actions.deviceUnpaired"))}>
+              {t("actions.unpair")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem variant="destructive" onSelect={remove}>
+          {t("actions.delete")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export function ConnectionActions({
+  id,
+  kind,
+  status,
+}: {
+  id: string;
+  kind: string;
+  status: string;
+}) {
+  const t = useTranslations("integrations");
+  const { pending, pairing, setPairing, connect, lifecycle, remove } = useConnectionActions(
+    id,
+    kind,
+  );
+
   const wahaActive = kind === "waha" && status === "connected";
   const wahaDown = kind === "waha" && (status === "error" || status === "disconnected");
-  const hasLifecycle = wahaActive || wahaDown;
 
   return (
     <div className="space-y-3">
@@ -87,39 +149,13 @@ export function ConnectionActions({
             {status === "connected" ? t("actions.reconnect") : t("actions.connect")}
           </Button>
         )}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <IconButton icon="ellipsis-vertical" label={t("actions.more")} disabled={pending} />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {hasLifecycle && (
-              <>
-                <DropdownMenuItem
-                  onSelect={() =>
-                    lifecycle(
-                      "restart",
-                      wahaActive ? t("actions.sessionRestarted") : t("actions.sessionRestartedQr"),
-                    )
-                  }
-                >
-                  {t("actions.restart")}
-                </DropdownMenuItem>
-                {wahaActive && (
-                  <DropdownMenuItem onSelect={() => lifecycle("stop", t("actions.sessionStopped"))}>
-                    {t("actions.stop")}
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onSelect={() => lifecycle("logout", t("actions.deviceUnpaired"))}>
-                  {t("actions.unpair")}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
-            )}
-            <DropdownMenuItem variant="destructive" onSelect={remove}>
-              {t("actions.delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <ActionsMenu
+          pending={pending}
+          wahaActive={wahaActive}
+          hasLifecycle={wahaActive || wahaDown}
+          lifecycle={lifecycle}
+          remove={remove}
+        />
       </div>
       {pairing && <PairingPanel id={id} initialQr={pairing.qr} onDone={() => setPairing(null)} />}
     </div>

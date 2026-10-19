@@ -45,14 +45,9 @@ describe("getServerEnv", () => {
   it("throws listing invalid vars when required vars are missing", () => {
     process.env = { NODE_ENV: "test" };
     expect(() => getServerEnv()).toThrowError(/Invalid environment variables/);
-    try {
-      getServerEnv();
-    } catch (error) {
-      const message = (error as Error).message;
-      expect(message).toContain("APP_URL");
-      expect(message).toContain("DATABASE_URL");
-      expect(message).toContain("BETTER_AUTH_SECRET");
-    }
+    expect(() => getServerEnv()).toThrowError(/APP_URL/);
+    expect(() => getServerEnv()).toThrowError(/DATABASE_URL/);
+    expect(() => getServerEnv()).toThrowError(/BETTER_AUTH_SECRET/);
   });
 
   it("rejects a short BETTER_AUTH_SECRET", () => {

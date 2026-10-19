@@ -56,9 +56,11 @@ function stubGoogle(tokenBody: unknown = null) {
 /** Starts a consent for the test org and returns its anti-CSRF state. */
 async function startConsent(): Promise<string> {
   const { authUrl } = await saveGoogleClient(db, tenant("admin"), {
-    clientId: "client-id",
-    clientSecret: "client-secret",
-    redirectUri: googleRedirectUri(),
+    input: {
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      redirectUri: googleRedirectUri(),
+    },
   });
   return new URL(authUrl).searchParams.get("state")!;
 }

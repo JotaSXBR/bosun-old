@@ -102,6 +102,75 @@ function OptionItem({ option }: { option: SelectOption }) {
   );
 }
 
+function SelectTrigger({
+  fid,
+  label,
+  icon,
+  placeholder,
+  size,
+  error,
+  describedId,
+  aria,
+}: {
+  fid: string;
+  label: SelectProps["label"];
+  icon: SelectProps["icon"];
+  placeholder: string;
+  size: NonNullable<SelectProps["size"]>;
+  error: SelectProps["error"];
+  describedId: string | undefined;
+  aria: Pick<SelectProps, "aria-describedby" | "aria-labelledby" | "aria-label" | "aria-invalid">;
+}) {
+  return (
+    <SelectPrimitive.Trigger
+      id={fid}
+      aria-labelledby={label ? `${fid}-label` : aria["aria-labelledby"]}
+      aria-label={aria["aria-label"]}
+      aria-describedby={fieldDescribedBy(aria["aria-describedby"], describedId)}
+      aria-invalid={error ? true : aria["aria-invalid"]}
+      className={cn(triggerClass({ size, error }))}
+    >
+      {icon && <Icon name={icon} size={15} className="text-icon-muted" />}
+      <span className="text-ink [&_[data-placeholder]]:text-ink-muted flex-1 text-left">
+        <SelectPrimitive.Value placeholder={placeholder} />
+      </span>
+      <SelectPrimitive.Icon asChild>
+        <Icon
+          name="chevron-down"
+          size={15}
+          className="text-icon-muted duration-base ease-standard transition-transform group-data-[state=open]:rotate-180"
+        />
+      </SelectPrimitive.Icon>
+    </SelectPrimitive.Trigger>
+  );
+}
+
+function FieldLabel({ id, children }: { id: string; children: React.ReactNode }) {
+  return (
+    <span id={id} className="text-ui text-ink font-medium">
+      {children}
+    </span>
+  );
+}
+
+function SelectPopup({ options }: { options: Array<string | SelectOption> }) {
+  return (
+    <SelectPrimitive.Portal>
+      <SelectPrimitive.Content
+        position="popper"
+        sideOffset={6}
+        className="bg-raised shadow-pop animate-fade z-110 min-w-(--radix-select-trigger-width) rounded-md p-1.5"
+      >
+        <SelectPrimitive.Viewport className="flex flex-col gap-0.5">
+          {normalizeOptions(options).map((o) => (
+            <OptionItem key={o.value} option={o} />
+          ))}
+        </SelectPrimitive.Viewport>
+      </SelectPrimitive.Content>
+    </SelectPrimitive.Portal>
+  );
+}
+
 export function Select({
   options = [],
   value,
@@ -123,16 +192,10 @@ export function Select({
 }: SelectProps) {
   const autoId = React.useId();
   const fid = id ?? autoId;
-  const norm = normalizeOptions(options);
   const ids = fieldIds(fid, error, hint);
-  const describedBy = fieldDescribedBy(aria["aria-describedby"], ids.describedId);
   return (
     <div className={cn("inline-flex min-w-0 flex-col gap-2", className)} style={style}>
-      {label && (
-        <span id={`${fid}-label`} className="text-ui text-ink font-medium">
-          {label}
-        </span>
-      )}
+      {label && <FieldLabel id={`${fid}-label`}>{label}</FieldLabel>}
       <SelectPrimitive.Root
         // Callers commonly pass `value={x || undefined}` for "no selection".
         // Radix treats undefined as uncontrolled, so the first real selection
@@ -140,48 +203,24 @@ export function Select({
         // empty state — coerce only when the caller clearly intends controlled
         // (has onChange and no defaultValue); a true uncontrolled Select keeps
         // receiving undefined.
-        value={
-          value !== undefined ? value : onChange && defaultValue === undefined ? "" : undefined
-        }
+        value={value ?? (onChange && defaultValue === undefined ? "" : undefined)}
         defaultValue={defaultValue}
         onValueChange={onChange}
         disabled={disabled}
         name={name}
         required={required}
       >
-        <SelectPrimitive.Trigger
-          id={fid}
-          aria-labelledby={label ? `${fid}-label` : aria["aria-labelledby"]}
-          aria-label={aria["aria-label"]}
-          aria-describedby={describedBy}
-          aria-invalid={error ? true : aria["aria-invalid"]}
-          className={cn(triggerClass({ size, error }))}
-        >
-          {icon && <Icon name={icon} size={15} className="text-icon-muted" />}
-          <span className="text-ink [&_[data-placeholder]]:text-ink-muted flex-1 text-left">
-            <SelectPrimitive.Value placeholder={placeholder} />
-          </span>
-          <SelectPrimitive.Icon asChild>
-            <Icon
-              name="chevron-down"
-              size={15}
-              className="text-icon-muted duration-base ease-standard transition-transform group-data-[state=open]:rotate-180"
-            />
-          </SelectPrimitive.Icon>
-        </SelectPrimitive.Trigger>
-        <SelectPrimitive.Portal>
-          <SelectPrimitive.Content
-            position="popper"
-            sideOffset={6}
-            className="bg-raised shadow-pop animate-fade z-110 min-w-(--radix-select-trigger-width) rounded-md p-1.5"
-          >
-            <SelectPrimitive.Viewport className="flex flex-col gap-0.5">
-              {norm.map((o) => (
-                <OptionItem key={o.value} option={o} />
-              ))}
-            </SelectPrimitive.Viewport>
-          </SelectPrimitive.Content>
-        </SelectPrimitive.Portal>
+        <SelectTrigger
+          fid={fid}
+          label={label}
+          icon={icon}
+          placeholder={placeholder}
+          size={size}
+          error={error}
+          describedId={ids.describedId}
+          aria={aria}
+        />
+        <SelectPopup options={options} />
       </SelectPrimitive.Root>
       <FieldNote id={ids.noteId} error={error} hint={hint} />
     </div>

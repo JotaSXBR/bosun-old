@@ -114,29 +114,7 @@ export class MetaCloudChannelProvider implements ChannelProvider {
   }
 
   async sendMessage(message: OutboundMessage): Promise<SendMessageResult> {
-    const { content } = message;
-    let body: Record<string, unknown>;
-    if (content.type === "text") {
-      body = {
-        messaging_product: "whatsapp",
-        to: message.to,
-        type: "text",
-        text: { body: content.text },
-      };
-    } else {
-      const mediaPayload: Record<string, unknown> =
-        content.source.type === "url" ? { link: content.source.url } : { id: content.source.id };
-      if (content.caption) mediaPayload.caption = content.caption;
-      if (content.filename && content.mediaKind === "document") {
-        mediaPayload.filename = content.filename;
-      }
-      body = {
-        messaging_product: "whatsapp",
-        to: message.to,
-        type: content.mediaKind,
-        [content.mediaKind]: mediaPayload,
-      };
-    }
+    const body = metaSendBody(message);
     const res = await this.fetchImpl(`${this.apiBase}/${this.config.phoneNumberId}/messages`, {
       method: "POST",
       headers: {
@@ -181,22 +159,45 @@ export class MetaCloudChannelProvider implements ChannelProvider {
   }
 
   parseWebhook(request: RawWebhookRequest): ChannelEvent[] {
-    let raw: unknown;
-    try {
-      raw = JSON.parse(request.rawBody);
-    } catch {
-      return [];
-    }
-    const parsed = webhookSchema.safeParse(raw);
+    const parsed = webhookSchema.safeParse(parseJson(request.rawBody));
     if (!parsed.success) return [];
-    const events: ChannelEvent[] = [];
-    for (const entry of parsed.data.entry ?? []) {
-      for (const change of entry.changes ?? []) {
-        events.push(...metaChangeToEvents(change.value));
-      }
-    }
-    return events;
+    return (parsed.data.entry ?? []).flatMap((entry) =>
+      (entry.changes ?? []).flatMap((change) => metaChangeToEvents(change.value)),
+    );
   }
+}
+
+/** Malformed JSON yields undefined, which the webhook schema rejects. */
+function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+function metaSendBody(message: OutboundMessage): Record<string, unknown> {
+  const { content } = message;
+  if (content.type === "text") {
+    return {
+      messaging_product: "whatsapp",
+      to: message.to,
+      type: "text",
+      text: { body: content.text },
+    };
+  }
+  const mediaPayload: Record<string, unknown> =
+    content.source.type === "url" ? { link: content.source.url } : { id: content.source.id };
+  if (content.caption) mediaPayload.caption = content.caption;
+  if (content.filename && content.mediaKind === "document") {
+    mediaPayload.filename = content.filename;
+  }
+  return {
+    messaging_product: "whatsapp",
+    to: message.to,
+    type: content.mediaKind,
+    [content.mediaKind]: mediaPayload,
+  };
 }
 
 function metaChangeToEvents(value: z.infer<typeof changeValueSchema>): ChannelEvent[] {

@@ -72,6 +72,58 @@ function CardHead({
   );
 }
 
+type CardShell = {
+  rootProps: React.ComponentProps<"section">;
+  ref?: React.Ref<HTMLElement>;
+  head: React.ReactNode;
+  padding?: number;
+  radius?: number;
+  style?: React.CSSProperties;
+  bodyClassName?: string;
+  bodyStyle?: React.CSSProperties;
+  children: React.ReactNode;
+};
+
+/** Root <section> props: tone, interactivity (button semantics + Enter/Space) and caller props. */
+function cardRootProps({
+  tone,
+  className,
+  onClick,
+  onKeyDown,
+  props,
+}: Pick<CardProps, "tone" | "className" | "onClick" | "onKeyDown"> & {
+  props: React.ComponentProps<"section">;
+}) {
+  const interactive = Boolean(onClick);
+  const keyboard = interactive
+    ? {
+        role: "button" as const,
+        tabIndex: 0,
+        onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => {
+          if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+            e.preventDefault();
+            onClick?.(e as unknown as React.MouseEvent<HTMLElement>);
+          }
+          onKeyDown?.(e);
+        },
+      }
+    : {};
+
+  return {
+    "data-tone": tone,
+    "data-interactive": interactive || undefined,
+    className: cn(
+      "bx-card flex min-w-0 flex-col text-left outline-none",
+      interactive && "focus-visible:shadow-focus",
+      className,
+    ),
+    onClick,
+    onKeyDown,
+    ...keyboard,
+    ...props,
+  };
+}
+
 export function Card({
   title,
   subtitle,
@@ -93,84 +145,76 @@ export function Card({
   ref,
   ...props
 }: CardProps) {
-  const interactive = Boolean(onClick);
-  const head = <CardHead title={title} subtitle={subtitle} icon={icon} titleSize={titleSize} />;
-
-  const keyboard = interactive
-    ? {
-        role: "button" as const,
-        tabIndex: 0,
-        onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => {
-          if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
-            e.preventDefault();
-            onClick?.(e as unknown as React.MouseEvent<HTMLElement>);
-          }
-          onKeyDown?.(e);
-        },
-      }
-    : {};
-
-  const rootProps = {
-    "data-tone": tone,
-    "data-interactive": interactive || undefined,
-    className: cn(
-      "bx-card flex min-w-0 flex-col text-left outline-none",
-      interactive && "focus-visible:shadow-focus",
-      className,
-    ),
-    onClick,
-    onKeyDown,
-    ...keyboard,
-    ...props,
+  const shell: CardShell = {
+    rootProps: cardRootProps({ tone, className, onClick, onKeyDown, props }),
+    ref,
+    head: <CardHead title={title} subtitle={subtitle} icon={icon} titleSize={titleSize} />,
+    padding,
+    radius,
+    style,
+    bodyClassName,
+    bodyStyle,
+    children,
   };
+  return actions ? (
+    <NotchedCard {...shell} actions={actions} notchGap={notchGap} fillet={fillet} />
+  ) : (
+    <PlainCard {...shell} />
+  );
+}
 
-  if (!actions) {
-    return (
-      <section
-        ref={ref}
-        {...rootProps}
-        className={cn(
-          rootProps.className,
-          "bx-card-part bx-card-shadow gap-4 rounded-(--card-radius) p-(--card-pad)",
-        )}
-        style={
-          {
-            "--card-radius": radius === undefined ? "var(--radius-card)" : `${radius}px`,
-            "--card-pad": padding === undefined ? undefined : `${padding}px`,
-            ...style,
-          } as React.CSSProperties
-        }
-      >
-        {head}
-        {children != null && (
-          <div
-            className={cn("flex min-w-0 flex-1 flex-col", bodyClassName)}
-            // eslint-disable-next-line shadcn/no-inline-styles -- caller-provided style passthrough; not statically checkable
-            style={bodyStyle}
-          >
-            {children}
-          </div>
-        )}
-      </section>
-    );
-  }
-
+function PlainCard({
+  rootProps,
+  ref,
+  head,
+  padding,
+  radius,
+  style,
+  bodyClassName,
+  bodyStyle,
+  children,
+}: CardShell) {
   return (
-    <NotchedCard
-      rootProps={rootProps}
+    <section
       ref={ref}
-      head={head}
-      actions={actions}
-      padding={padding}
-      radius={radius}
-      notchGap={notchGap}
-      fillet={fillet}
-      style={style}
-      bodyClassName={bodyClassName}
-      bodyStyle={bodyStyle}
+      {...rootProps}
+      className={cn(
+        rootProps.className,
+        "bx-card-part bx-card-shadow gap-4 rounded-(--card-radius) p-(--card-pad)",
+      )}
+      style={
+        {
+          "--card-radius": radius === undefined ? "var(--radius-card)" : `${radius}px`,
+          "--card-pad": padding === undefined ? undefined : `${padding}px`,
+          ...style,
+        } as React.CSSProperties
+      }
     >
-      {children}
-    </NotchedCard>
+      {head}
+      {children != null && (
+        <div
+          className={cn("flex min-w-0 flex-1 flex-col", bodyClassName)}
+          // eslint-disable-next-line shadcn/no-inline-styles -- caller-provided style passthrough; not statically checkable
+          style={bodyStyle}
+        >
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function NotchedTop({ head, actions }: { head: React.ReactNode; actions: React.ReactNode }) {
+  return (
+    <div className="flex items-stretch">
+      <div className="bx-card-part bx-card-shadow relative min-w-0 flex-1 rounded-t-(--card-radius) px-(--card-pad) pt-(--card-tab-pt)">
+        {head}
+        <span aria-hidden="true" className="card-fillet" />
+      </div>
+      <div className="flex items-start gap-2 pb-(--card-notch-gap) pl-(--card-notch-gap)">
+        {actions}
+      </div>
+    </div>
   );
 }
 
@@ -187,20 +231,7 @@ function NotchedCard({
   bodyClassName,
   bodyStyle,
   children,
-}: {
-  rootProps: React.ComponentProps<"section">;
-  ref?: React.Ref<HTMLElement>;
-  head: React.ReactNode;
-  actions: React.ReactNode;
-  padding?: number;
-  radius?: number;
-  notchGap?: number;
-  fillet?: number;
-  style?: React.CSSProperties;
-  bodyClassName?: string;
-  bodyStyle?: React.CSSProperties;
-  children: React.ReactNode;
-}) {
+}: CardShell & { actions: React.ReactNode; notchGap?: number; fillet?: number }) {
   const padN = padding ?? 24;
   const gapN = notchGap ?? 8;
   return (
@@ -219,15 +250,7 @@ function NotchedCard({
         } as React.CSSProperties
       }
     >
-      <div className="flex items-stretch">
-        <div className="bx-card-part bx-card-shadow relative min-w-0 flex-1 rounded-t-(--card-radius) px-(--card-pad) pt-(--card-tab-pt)">
-          {head}
-          <span aria-hidden="true" className="card-fillet" />
-        </div>
-        <div className="flex items-start gap-2 pb-(--card-notch-gap) pl-(--card-notch-gap)">
-          {actions}
-        </div>
-      </div>
+      <NotchedTop head={head} actions={actions} />
       <div
         className={cn(
           "bx-card-part flex min-w-0 flex-1 flex-col rounded-tr-(--card-radius) rounded-b-(--card-radius) px-(--card-pad) pt-(--card-body-pt) pb-(--card-pad)",

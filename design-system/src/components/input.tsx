@@ -29,7 +29,17 @@ export interface InputProps extends Omit<React.ComponentProps<"input">, "size"> 
   inputStyle?: React.CSSProperties;
 }
 
-function fieldMeta(fid: string, error?: string, hint?: string, described?: string) {
+function fieldMeta({
+  fid,
+  error,
+  hint,
+  described,
+}: {
+  fid: string;
+  error?: string;
+  hint?: string;
+  described?: string;
+}) {
   const hintId = `${fid}-hint`;
   const errorId = `${fid}-error`;
   const joined = [described, error ? errorId : hint ? hintId : undefined].filter(Boolean).join(" ");
@@ -85,6 +95,24 @@ function FieldNote({ id, error, hint }: { id: string; error?: string; hint?: str
   );
 }
 
+function NativeInput({
+  small,
+  inputStyle,
+  ...props
+}: React.ComponentProps<"input"> & { small: boolean; inputStyle?: React.CSSProperties }) {
+  return (
+    <input
+      className={cn(
+        "text-ink-strong placeholder:text-ink-subtle h-full min-w-0 flex-1 border-0 bg-transparent outline-none focus-visible:shadow-none",
+        small ? "text-ui" : "text-sm",
+      )}
+      // eslint-disable-next-line shadcn/no-inline-styles -- caller-provided style passthrough; not statically checkable
+      style={inputStyle}
+      {...props}
+    />
+  );
+}
+
 export function Input({
   label,
   hint,
@@ -105,8 +133,8 @@ export function Input({
 }: InputProps) {
   const autoId = React.useId();
   const fid = id ?? autoId;
+  const { describedBy, noteId } = fieldMeta({ fid, error, hint, described: ariaDescribedBy });
   const invalid = ariaInvalid ?? Boolean(error);
-  const { describedBy, noteId } = fieldMeta(fid, error, hint, ariaDescribedBy);
   return (
     <label
       htmlFor={fid}
@@ -115,24 +143,16 @@ export function Input({
     >
       {label && <span className="text-ui text-ink font-medium">{label}</span>}
       <FieldBox
-        size={size}
-        shape={shape}
-        invalid={invalid}
-        icon={icon}
-        trailing={trailing}
+        {...{ size, shape, invalid, icon, trailing }}
         input={
-          <input
+          <NativeInput
             ref={ref}
             id={fid}
             disabled={disabled}
             aria-invalid={invalid}
             aria-describedby={describedBy}
-            className={cn(
-              "text-ink-strong placeholder:text-ink-subtle h-full min-w-0 flex-1 border-0 bg-transparent outline-none focus-visible:shadow-none",
-              size === "sm" ? "text-ui" : "text-sm",
-            )}
-            // eslint-disable-next-line shadcn/no-inline-styles -- caller-provided style passthrough; not statically checkable
-            style={inputStyle}
+            small={size === "sm"}
+            inputStyle={inputStyle}
             {...props}
           />
         }

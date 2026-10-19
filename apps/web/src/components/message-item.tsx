@@ -1,22 +1,16 @@
 // Server-rendered message bubble — interactive affordances are the client
-// islands in ./message-extras (menu, chips, edit history, view-original).
+// islands in ./message-extras, ./message-menu and ./message-context-menu.
 import type { MessageContent, MessageWithAuthorRow } from "@crm/core/messaging";
 import type { OrgMember } from "@crm/core/organizations";
 import type { TeamWithMembers } from "@crm/core/teams";
-import { Icon } from "@crm/design-system/components/icon";
 import { cn } from "@crm/design-system/lib/utils";
-import Image from "next/image";
 import { getTranslations } from "next-intl/server";
 
-import { AudioPlayer } from "@/components/audio-player";
 import { LocalDateTime } from "@/components/local-date-time";
-import {
-  EditedIndicator,
-  MessageContextMenu,
-  MessageMenu,
-  ResendButton,
-  RevokedActions,
-} from "@/components/message-extras";
+import { MessageContextMenu } from "@/components/message-context-menu";
+import { EditedIndicator, ResendButton, RevokedActions } from "@/components/message-extras";
+import { MediaContent } from "@/components/message-media";
+import { MessageMenu } from "@/components/message-menu";
 import { ReactionChips } from "@/components/reaction-chips";
 
 type T = Awaited<ReturnType<typeof getTranslations>>;
@@ -76,84 +70,6 @@ function QuoteBlock({
       <p className="line-clamp-2 italic opacity-80">
         {quoted.revoked ? t("deleted") : (quoted.preview ?? "…")}
       </p>
-    </div>
-  );
-}
-
-/** Media bubble — the proxy route streams bytes from storage or WAHA. */
-function MediaContent({ msg, t, tc }: { msg: MessageWithAuthorRow; t: T; tc: T }) {
-  const content = msg.content as Extract<MessageContent, { type: "media" }>;
-  const meta = msg.metadata as { transcript?: string; unsupportedMedia?: boolean };
-  const src = `/api/media/${msg.id}`;
-  if (meta.unsupportedMedia) {
-    // Ingest flagged a media event with no fetchable source — a real row
-    // (ordering preserved) rendered as an internal note, not a broken box.
-    return (
-      <p className="text-ink-muted flex items-center gap-1.5 text-xs italic">
-        <Icon name="file" className="size-3.5 shrink-0" />
-        {t("unsupportedMedia")}
-      </p>
-    );
-  }
-  const isSticker = content.mediaKind === "image" && content.mimeType === "image/webp";
-  return (
-    <div className="space-y-1">
-      {content.mediaKind === "image" &&
-        (isSticker ? (
-          // Sticker (image/webp): no chrome box — natural size, transparency
-          // kept, animation preserved via unoptimized.
-          <Image
-            src={src}
-            alt={t("stickerAlt")}
-            width={160}
-            height={160}
-            unoptimized
-            className="h-auto max-w-40"
-            data-testid="sticker"
-          />
-        ) : (
-          // Reserved box (message content carries no dimensions) — `fill` +
-          // `object-contain` shows the whole image without a layout shift.
-          <div className="bg-page/60 relative aspect-video w-64 max-w-full overflow-hidden rounded-md">
-            <Image
-              src={src}
-              alt={content.caption ?? t("imageAlt")}
-              fill
-              // eslint-disable-next-line no-restricted-syntax -- next/image sizes attribute (runtime hint, not styling)
-              sizes="256px"
-              unoptimized
-              className="object-contain"
-            />
-          </div>
-        ))}
-      {content.mediaKind === "video" && (
-        <video controls src={src} className="max-w-full rounded-md">
-          <track kind="captions" label={tc("noCaptions")} />
-        </video>
-      )}
-      {content.mediaKind === "audio" && (
-        <>
-          <AudioPlayer src={src} />
-          {typeof meta.transcript === "string" && meta.transcript !== "" && (
-            <p
-              className="text-ink-muted rounded-xs border-l-2 border-current/40 pl-2 text-xs italic"
-              data-testid="audio-transcript"
-            >
-              {meta.transcript}
-            </p>
-          )}
-        </>
-      )}
-      {content.mediaKind === "document" && (
-        <a
-          href={src}
-          className="flex items-center gap-2 underline underline-offset-2"
-          data-testid="media-document"
-        >
-          📄 {content.filename ?? t("document")}
-        </a>
-      )}
-      {content.caption && <p className="text-sm whitespace-pre-wrap">{content.caption}</p>}
     </div>
   );
 }
@@ -283,71 +199,58 @@ function BubbleMeta({
 }
 
 /** Per-message affordances — the ~15min edit window is enforced server-side. */
-function messagePermissions(args: {
+function messageAccess(args: {
   msg: MessageWithAuthorRow;
-  content: MessageContent;
   currentUserId: string;
   canInteract: boolean;
   t: T;
 }) {
-  const { msg, content, currentUserId, canInteract, t } = args;
+  const { msg, currentUserId, canInteract, t } = args;
+  const content = msg.content as MessageContent;
   const isChannelMessage = msg.externalId !== null;
   const available = canInteract && isChannelMessage && msg.revokedAt === null;
   const ownOutbound = available && msg.direction === "outbound" && msg.authorId === currentUserId;
+  const currentText = messageText(content, t);
   return {
     isChannelMessage,
-    canReact: available,
-    canEdit: ownOutbound && content.type === "text",
-    canDelete: ownOutbound,
-    replyTarget:
-      available && msg.externalId
-        ? { externalId: msg.externalId, preview: messageText(content, t) }
-        : undefined,
+    access: {
+      currentText,
+      canReact: available,
+      canEdit: ownOutbound && content.type === "text",
+      canDelete: ownOutbound,
+      replyTarget:
+        available && msg.externalId
+          ? { externalId: msg.externalId, preview: currentText }
+          : undefined,
+    },
   };
 }
 
-export async function MessageItem({
-  msg,
-  members,
-  sectors,
-  currentUserId,
-  canInspect,
-  canInteract,
-}: {
+type MessageItemProps = {
   msg: MessageWithAuthorRow;
   members: OrgMember[];
   sectors: TeamWithMembers[];
   currentUserId: string;
   canInspect: boolean;
   canInteract: boolean;
-}) {
+};
+
+export async function MessageItem(props: MessageItemProps) {
+  const { msg, members, sectors, currentUserId, canInspect, canInteract } = props;
   const t = await getTranslations("message");
   const tc = await getTranslations("common");
-  const meta = msg.metadata as Record<string, unknown>;
-  if (meta.system) return <SystemLine msg={msg} members={members} sectors={sectors} t={t} />;
+  if ((msg.metadata as Record<string, unknown>).system) {
+    return <SystemLine msg={msg} members={members} sectors={sectors} t={t} />;
+  }
   if (msg.private) return <PrivateNote msg={msg} t={t} />;
 
   const outbound = msg.direction === "outbound";
-  const content = msg.content as MessageContent;
-  const { isChannelMessage, canReact, canEdit, canDelete, replyTarget } = messagePermissions({
-    msg,
-    content,
-    currentUserId,
-    canInteract,
-    t,
-  });
+  const { isChannelMessage, access } = messageAccess({ msg, currentUserId, canInteract, t });
+  const target = { conversationId: msg.conversationId, messageId: msg.id };
 
   return (
     <li className={cn("group flex", outbound ? "justify-end" : "justify-start")}>
-      <MessageContextMenu
-        conversationId={msg.conversationId}
-        messageId={msg.id}
-        currentText={messageText(content, t)}
-        canReact={canReact}
-        canEdit={canEdit}
-        canDelete={canDelete}
-        replyTarget={replyTarget}
-      >
+      <MessageContextMenu {...target} {...access}>
         <div className="max-w-4/5">
           <div
             id={`msg-${msg.id}`}
@@ -364,17 +267,7 @@ export async function MessageItem({
               isChannelMessage={isChannelMessage}
               canInspect={canInspect}
               t={t}
-              menu={
-                <MessageMenu
-                  conversationId={msg.conversationId}
-                  messageId={msg.id}
-                  currentText={messageText(content, t)}
-                  canReact={canReact}
-                  canEdit={canEdit}
-                  canDelete={canDelete}
-                  replyTarget={replyTarget}
-                />
-              }
+              menu={<MessageMenu {...target} {...access} />}
             />
           </div>
           <ReactionChips

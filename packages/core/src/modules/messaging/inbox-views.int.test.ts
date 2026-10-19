@@ -32,11 +32,13 @@ function ctx(organizationId: string, role: TenantContext["role"]): TenantContext
 async function newTicket(channelUserId: string, displayName: string, timestamp: Date) {
   await withTenant(db, orgA, (tx) =>
     ingestChannelEvent(tx, connA, {
-      type: "message.received",
-      externalMessageId: `m-${channelUserId}-${timestamp.getTime()}`,
-      from: { channelUserId, displayName },
-      content: { type: "text", text: `oi de ${displayName}` },
-      timestamp,
+      event: {
+        type: "message.received",
+        externalMessageId: `m-${channelUserId}-${timestamp.getTime()}`,
+        from: { channelUserId, displayName },
+        content: { type: "text", text: `oi de ${displayName}` },
+        timestamp,
+      },
     }),
   );
   return withTenant(db, orgA, async (tx) => {
@@ -97,7 +99,7 @@ describe("inbox views", () => {
   it("queue shows unassigned open tickets, mine shows the agent's active ones", async () => {
     const queued = await newTicket("v-queue", "Queued", new Date("2024-01-01T10:00:00Z"));
     const mine = await newTicket("v-mine", "Mine", new Date("2024-01-01T11:00:00Z"));
-    await pickupConversation(db, ctx(orgA, "agent"), { conversationId: mine.id });
+    await pickupConversation(db, ctx(orgA, "agent"), { input: { conversationId: mine.id } });
 
     const agent = ctx(orgA, "agent");
     const queue = await listTenantConversations(db, agent, { view: "queue" });
@@ -113,8 +115,8 @@ describe("inbox views", () => {
 
   it("closed collects resolved tickets; pending stays empty until intake", async () => {
     const done = await newTicket("v-closed", "Done", new Date("2024-01-02T10:00:00Z"));
-    await pickupConversation(db, ctx(orgA, "agent"), { conversationId: done.id });
-    await resolveConversation(db, ctx(orgA, "agent"), { conversationId: done.id });
+    await pickupConversation(db, ctx(orgA, "agent"), { input: { conversationId: done.id } });
+    await resolveConversation(db, ctx(orgA, "agent"), { input: { conversationId: done.id } });
 
     const agent = ctx(orgA, "agent");
     const closed = await listTenantConversations(db, agent, { view: "closed" });
@@ -168,9 +170,12 @@ describe("inbox views", () => {
         authorId: userId,
         metadata: {},
       });
-      await updateConversationLastMessage(tx, t1.id, sentAt, {
-        direction: "outbound",
-        preview: "resposta",
+      await updateConversationLastMessage(tx, t1.id, {
+        lastMessageAt: sentAt,
+        lastMessage: {
+          direction: "outbound",
+          preview: "resposta",
+        },
       });
     });
     const after = await listTenantConversations(db, agent, {
@@ -186,7 +191,7 @@ describe("inbox views", () => {
   it("internal note does not clear awaitingReply nor leak into the preview", async () => {
     const t1 = await newTicket("v-note", "Note", new Date("2024-01-04T12:00:00Z"));
     const agent = ctx(orgA, "agent");
-    await pickupConversation(db, agent, { conversationId: t1.id });
+    await pickupConversation(db, agent, { input: { conversationId: t1.id } });
     await addInternalNote(db, agent, {
       conversationId: t1.id,
       text: "nota interna — não deve virar preview",

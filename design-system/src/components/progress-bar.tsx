@@ -55,6 +55,49 @@ function Thumb({ pct, h }: { pct: number; h: number }) {
   );
 }
 
+function Track({
+  value,
+  max,
+  pct,
+  h,
+  pattern,
+  tone,
+  thumb,
+}: {
+  value: number;
+  max: number;
+  pct: number;
+  h: number;
+  pattern: boolean;
+  tone: keyof typeof TONES;
+  thumb: boolean;
+}) {
+  return (
+    <div
+      role="progressbar"
+      aria-valuenow={value}
+      aria-valuemin={0}
+      aria-valuemax={max}
+      className={cn("rounded-pill bg-data-track relative h-(--track-h)", pattern && "bx-hatch")}
+      style={{ "--track-h": `${h}px` } as React.CSSProperties}
+    >
+      <div
+        className={cn(
+          "rounded-pill duration-chart ease-standard absolute top-0 bottom-0 left-0 w-(--fill-w) min-w-(--fill-min) transition-[width]",
+          TONES[tone],
+        )}
+        style={
+          {
+            "--fill-w": `${pct}%`,
+            "--fill-min": `${pct > 0 ? h : 0}px`,
+          } as React.CSSProperties
+        }
+      />
+      {thumb && <Thumb pct={pct} h={h} />}
+    </div>
+  );
+}
+
 export function ProgressBar({
   value = 0,
   max = 100,
@@ -74,28 +117,7 @@ export function ProgressBar({
   return (
     <div ref={ref} className={cn("flex min-w-0 flex-col gap-2.5", className)} {...props}>
       <Header label={label} valueLabel={valueLabel} />
-      <div
-        role="progressbar"
-        aria-valuenow={value}
-        aria-valuemin={0}
-        aria-valuemax={max}
-        className={cn("rounded-pill bg-data-track relative h-(--track-h)", pattern && "bx-hatch")}
-        style={{ "--track-h": `${h}px` } as React.CSSProperties}
-      >
-        <div
-          className={cn(
-            "rounded-pill duration-chart ease-standard absolute top-0 bottom-0 left-0 w-(--fill-w) min-w-(--fill-min) transition-[width]",
-            TONES[tone],
-          )}
-          style={
-            {
-              "--fill-w": `${pct}%`,
-              "--fill-min": `${pct > 0 ? h : 0}px`,
-            } as React.CSSProperties
-          }
-        />
-        {thumb && <Thumb pct={pct} h={h} />}
-      </div>
+      <Track value={value} max={max} pct={pct} h={h} pattern={pattern} tone={tone} thumb={thumb} />
       {labels && (
         <div className="text-ink-subtle flex justify-between text-xs">
           {labels.map((l, i) => (

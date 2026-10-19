@@ -7,42 +7,96 @@ import { Select } from "@crm/design-system/components/select";
 import { toast } from "@crm/design-system/components/toast";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useState } from "react";
 
 import { saveSetupEmailAction } from "@/server/actions/setup";
 
-/**
- * Minimal e-mail provider form for the first-run wizard. Secrets are sent
- * raw (first save — nothing to preserve); the server stores them encrypted.
- */
-export function SetupForm() {
+function readSetupValues(fd: FormData, provider: string): Record<string, unknown> {
+  const str = (key: string) => {
+    const v = fd.get(key);
+    return typeof v === "string" ? v : "";
+  };
+  const smtpPort = str("smtpPort");
+  return {
+    provider,
+    from: str("from"),
+    resendApiKey: str("resendApiKey"),
+    smtp: {
+      host: str("smtpHost"),
+      port: smtpPort === "" ? "" : Number(smtpPort),
+      user: str("smtpUser"),
+      password: str("smtpPassword"),
+      secure: fd.has("smtpSecure"),
+    },
+  };
+}
+
+function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <label className="text-sm font-medium" htmlFor={id}>
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function SmtpFields() {
   const t = useTranslations("setup");
   const tc = useTranslations("common");
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <Field id="setup-smtp-host" label={t("host")}>
+        <Input
+          shape="rounded"
+          id="setup-smtp-host"
+          name="smtpHost"
+          placeholder="smtp.exemplo.com"
+        />
+      </Field>
+      <Field id="setup-smtp-port" label={t("port")}>
+        <Input
+          shape="rounded"
+          id="setup-smtp-port"
+          name="smtpPort"
+          type="number"
+          placeholder="587"
+        />
+      </Field>
+      <Field id="setup-smtp-user" label={t("user")}>
+        <Input shape="rounded" id="setup-smtp-user" name="smtpUser" />
+      </Field>
+      <Field id="setup-smtp-password" label={tc("password")}>
+        <Input
+          shape="rounded"
+          id="setup-smtp-password"
+          name="smtpPassword"
+          type="password"
+          autoComplete="new-password"
+        />
+      </Field>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          name="smtpSecure"
+          type="checkbox"
+          className="border-line h-4 w-4 rounded-xs border"
+        />
+        {t("tls")}
+      </label>
+    </div>
+  );
+}
+
+function useSetupSubmit(provider: string) {
   const router = useRouter();
-  const [provider, setProvider] = useState("resend");
   const [pending, setPending] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
-    const str = (key: string) => {
-      const v = fd.get(key);
-      return typeof v === "string" ? v : "";
-    };
-    const smtpPort = str("smtpPort");
-    const values: Record<string, unknown> = {
-      provider,
-      from: str("from"),
-      resendApiKey: str("resendApiKey"),
-      smtp: {
-        host: str("smtpHost"),
-        port: smtpPort === "" ? "" : Number(smtpPort),
-        user: str("smtpUser"),
-        password: str("smtpPassword"),
-        secure: fd.has("smtpSecure"),
-      },
-    };
+    const values = readSetupValues(fd, provider);
     setPending(true);
     const result = await saveSetupEmailAction(values);
     setPending(false);
@@ -53,6 +107,18 @@ export function SetupForm() {
       toast.error(result.error);
     }
   }
+  return { pending, onSubmit };
+}
+
+/**
+ * Minimal e-mail provider form for the first-run wizard. Secrets are sent
+ * raw (first save — nothing to preserve); the server stores them encrypted.
+ */
+export function SetupForm() {
+  const t = useTranslations("setup");
+  const tc = useTranslations("common");
+  const [provider, setProvider] = useState("resend");
+  const { pending, onSubmit } = useSetupSubmit(provider);
 
   return (
     <Card title={t("title")}>
@@ -69,23 +135,17 @@ export function SetupForm() {
           onChange={setProvider}
         />
 
-        <div className="space-y-1">
-          <label className="text-sm font-medium" htmlFor="setup-from">
-            {t("from")}
-          </label>
+        <Field id="setup-from" label={t("from")}>
           <Input
             shape="rounded"
             id="setup-from"
             name="from"
             placeholder="Bosun <noreply@exemplo.com>"
           />
-        </div>
+        </Field>
 
         {provider === "resend" && (
-          <div className="space-y-1">
-            <label className="text-sm font-medium" htmlFor="setup-resend-key">
-              {t("resendKey")}
-            </label>
+          <Field id="setup-resend-key" label={t("resendKey")}>
             <Input
               shape="rounded"
               id="setup-resend-key"
@@ -94,62 +154,10 @@ export function SetupForm() {
               autoComplete="new-password"
               placeholder="re_..."
             />
-          </div>
+          </Field>
         )}
 
-        {provider === "smtp" && (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-sm font-medium" htmlFor="setup-smtp-host">
-                {t("host")}
-              </label>
-              <Input
-                shape="rounded"
-                id="setup-smtp-host"
-                name="smtpHost"
-                placeholder="smtp.exemplo.com"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium" htmlFor="setup-smtp-port">
-                {t("port")}
-              </label>
-              <Input
-                shape="rounded"
-                id="setup-smtp-port"
-                name="smtpPort"
-                type="number"
-                placeholder="587"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium" htmlFor="setup-smtp-user">
-                {t("user")}
-              </label>
-              <Input shape="rounded" id="setup-smtp-user" name="smtpUser" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium" htmlFor="setup-smtp-password">
-                {tc("password")}
-              </label>
-              <Input
-                shape="rounded"
-                id="setup-smtp-password"
-                name="smtpPassword"
-                type="password"
-                autoComplete="new-password"
-              />
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                name="smtpSecure"
-                type="checkbox"
-                className="border-line h-4 w-4 rounded-xs border"
-              />
-              {t("tls")}
-            </label>
-          </div>
-        )}
+        {provider === "smtp" && <SmtpFields />}
 
         <Button variant="primary" type="submit" disabled={pending}>
           {pending ? tc("saving") : t("submit")}

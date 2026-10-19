@@ -10,7 +10,11 @@ import { DomainError, NotFoundError } from "../../errors";
 import { decryptJson, encryptJson } from "../../lib/crypto";
 import type { TenantContext } from "../../tenant/context";
 import { assertPermission } from "../../tenant/context";
-import { resolveMetaConfig } from "../platform";
+import {
+  metaCredentialsWithPlatformFallback,
+  wahaPlatformCredentials,
+  webhookUrlFor,
+} from "./credentials";
 import type { ChannelConnectionRow } from "./repository";
 import {
   deleteChannelConnection,
@@ -22,7 +26,7 @@ import {
   updateConnectionMetadata,
   updateConnectionStatus,
 } from "./repository";
-import type { CreateChannelConnectionInput, MetaCloudCredentialsInput } from "./schemas";
+import type { CreateChannelConnectionInput } from "./schemas";
 import {
   createChannelConnectionInput,
   metaCloudCredentialsSchema,
@@ -65,6 +69,19 @@ export async function createChannelConnection(
   });
 }
 
+/** On connect, reads /me once so externalRef shows the paired number. */
+async function pairedPhone(
+  conn: ChannelConnectionRow,
+  provider: ChannelProvider,
+  status: ConnectResult["status"],
+): Promise<string | undefined> {
+  const current = conn.externalRef ?? undefined;
+  if (status !== "connected" || !provider.getSessionInfo) return current;
+  const info = await provider.getSessionInfo().catch(() => undefined);
+  if (info?.phone) return info.phone;
+  return current;
+}
+
 /**
  * Requires integrations:manage. Drives the provider connect flow — WAHA:
  * create/register/start the session and re-register the webhook; returns
@@ -81,13 +98,7 @@ export async function refreshConnectionStatus(
   const provider = providerFor(conn);
   const result = await provider.connect();
 
-  // On connect, read /me once so externalRef shows the paired number.
-  let externalRef = conn.externalRef ?? undefined;
-  if (result.status === "connected" && provider.getSessionInfo) {
-    const info = await provider.getSessionInfo().catch(() => undefined);
-    if (info?.phone) externalRef = info.phone;
-  }
-
+  const externalRef = await pairedPhone(conn, provider, result.status);
   await withTenant(db, ctx.organizationId, (tx) =>
     updateConnectionStatus(tx, conn.id, {
       status: result.status,
@@ -114,8 +125,7 @@ export type RefreshResult = {
 export async function requestConnectionPairingCode(
   db: Database,
   ctx: TenantContext,
-  id: string,
-  phoneNumber: string,
+  { id, phoneNumber }: { id: string; phoneNumber: string },
 ): Promise<{ code: string }> {
   assertPermission(ctx, { integrations: ["manage"] });
   const parsed = z
@@ -138,8 +148,7 @@ export async function requestConnectionPairingCode(
 export async function connectionLifecycle(
   db: Database,
   ctx: TenantContext,
-  id: string,
-  action: "stop" | "logout" | "restart",
+  { id, action }: { id: string; action: "stop" | "logout" | "restart" },
 ): Promise<RefreshResult> {
   assertPermission(ctx, { integrations: ["manage"] });
   const conn = await getConnectionOrThrow(db, ctx, id);
@@ -168,8 +177,7 @@ export async function connectionLifecycle(
 export async function updateWidgetConfig(
   db: Database,
   ctx: TenantContext,
-  id: string,
-  config: unknown,
+  { id, config }: { id: string; config: unknown },
 ): Promise<ChannelConnectionRow> {
   assertPermission(ctx, { integrations: ["manage"] });
   const conn = await getConnectionOrThrow(db, ctx, id);
@@ -312,82 +320,6 @@ async function getConnectionOrThrow(
   const conn = await getChannelConnection(db, ctx.organizationId, id);
   if (!conn) throw new NotFoundError("Channel connection", id);
   return conn;
-}
-
-/**
- * Builds the per-connection webhook URL WAHA posts to. `APP_URL` is read
- * directly like crypto.ts reads its key — @crm/config validates it at boot.
- * Undefined when the env is absent (unit tests) — the adapter then skips
- * webhook registration.
- */
-function webhookUrlFor(webhookToken: string): string | undefined {
-  const base = process.env.APP_URL?.replace(/\/+$/, "");
-  return base ? `${base}/api/webhooks/channels/${webhookToken}` : undefined;
-}
-
-/**
- * WAHA credentials are platform-owned: baseUrl/apiKey come from env (read
- * directly like webhookUrlFor reads APP_URL — @crm/config validates them at
- * boot). The webhook HMAC key is generated per connection and the session
- * name derives from the connection name with a random suffix — two
- * connections with the same name must never share a WAHA session or their
- * webhooks would cross-wire.
- */
-function wahaPlatformCredentials(name: string) {
-  const baseUrl = process.env.WAHA_BASE_URL;
-  const apiKey = process.env.WAHA_API_KEY;
-  if (!baseUrl || !apiKey) {
-    throw new DomainError(
-      "WAHA_NOT_CONFIGURED",
-      "WhatsApp (WAHA) não está configurado nesta instância.",
-    );
-  }
-  return {
-    baseUrl,
-    apiKey,
-    webhookHmacKey: randomBytes(24).toString("base64url"),
-    session: sessionNameFrom(name),
-  };
-}
-
-/**
- * Meta app-level secrets (appSecret/verifyToken/graphApiVersion) may be
- * omitted per connection — platform_settings.meta fills the gaps. The merged
- * snapshot is validated against the strict credentials schema, so a missing
- * appSecret/verifyToken with no platform default fails here with a clear
- * error instead of a broken connection later.
- */
-async function metaCredentialsWithPlatformFallback(db: Database, input: MetaCloudCredentialsInput) {
-  const platform = await resolveMetaConfig(db);
-  const merged = {
-    phoneNumberId: input.phoneNumberId,
-    accessToken: input.accessToken,
-    appSecret: input.appSecret ?? platform.appSecret,
-    verifyToken: input.verifyToken ?? platform.verifyToken,
-    graphApiVersion: input.graphApiVersion ?? platform.graphApiVersion,
-  };
-  const result = metaCloudCredentialsSchema.safeParse(merged);
-  if (!result.success) {
-    throw new DomainError(
-      "META_CREDENTIALS_INCOMPLETE",
-      "Credenciais Meta incompletas — informe appSecret/verifyToken na conexão ou configure o grupo Meta nas settings da plataforma.",
-    );
-  }
-  return result.data;
-}
-
-/** URL-safe slug of the connection name + uniqueness suffix. */
-function sessionNameFrom(name: string): string {
-  const slug = name
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 55);
-  return slug
-    ? `${slug}-${randomBytes(4).toString("hex")}`
-    : `conn_${randomBytes(8).toString("hex")}`;
 }
 
 /** Decrypts credentials and builds the provider with the conn's webhook URL. */

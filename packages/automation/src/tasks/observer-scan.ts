@@ -23,6 +23,15 @@ export type ObserverScanDeps = {
   enqueueDraft?: typeof enqueueGenerateDraft;
 };
 
+type ScanCounts = { nudges: number; drafts: number; cleaned: number };
+type ScanContext = { db: Database; org: ObserverScanOrg; deps: ObserverScanDeps | undefined };
+
+function addCounts(total: ScanCounts, add: ScanCounts) {
+  total.nudges += add.nudges;
+  total.drafts += add.drafts;
+  total.cleaned += add.cleaned;
+}
+
 /**
  * Interval-mode observer (docs/product/ai-agents.md): deterministic scan —
  * NO LLM call here. For each due org (mode='interval', per-org cadence
@@ -35,7 +44,7 @@ export type ObserverScanDeps = {
 export async function observerScanHandler(
   payload: unknown,
   deps?: ObserverScanDeps,
-): Promise<{ scanned: number; nudges: number; drafts: number; cleaned: number }> {
+): Promise<{ scanned: number } & ScanCounts> {
   observerScanPayload.parse(payload);
   const db = getDb();
   const due = await withServiceAccess(db, (tx) => listObserverScanDue(tx));
@@ -43,10 +52,7 @@ export async function observerScanHandler(
   for (const org of due) {
     totals.scanned += 1;
     try {
-      const result = await scanOrganization(db, org, deps);
-      totals.nudges += result.nudges;
-      totals.drafts += result.drafts;
-      totals.cleaned += result.cleaned;
+      addCounts(totals, await scanOrganization(db, org, deps));
     } catch (error) {
       // One broken org must not kill the sweep — its cadence watermark
       // already advanced, so it retries on its own schedule, not the
@@ -64,7 +70,7 @@ async function scanOrganization(
   db: Database,
   org: ObserverScanOrg,
   deps?: ObserverScanDeps,
-): Promise<{ nudges: number; drafts: number; cleaned: number }> {
+): Promise<ScanCounts> {
   const { organizationId } = org;
   // The watermark advances even when the org can't run — a missing
   // credential or a mid-scan failure shouldn't re-scan every cron tick.
@@ -74,7 +80,19 @@ async function scanOrganization(
   );
   if (!configured) return { nudges: 0, drafts: 0, cleaned: 0 };
 
-  const cleaned = await withTenant(db, organizationId, async (tx) => {
+  const cleaned = await supersedeStaleNudges(db, organizationId);
+  const candidates = await withTenant(db, organizationId, (tx) =>
+    listNudgeCandidates(tx, organizationId, {
+      idleMinutes: org.idleMinutes,
+      cooldownMinutes: org.idleMinutes,
+    }),
+  );
+  const acted = await actOnCandidates({ db, org, deps }, candidates);
+  return { ...acted, cleaned };
+}
+
+async function supersedeStaleNudges(db: Database, organizationId: string): Promise<number> {
+  return withTenant(db, organizationId, async (tx) => {
     const stale = await listStaleNudges(tx, organizationId);
     await supersedeNudges(
       tx,
@@ -83,34 +101,37 @@ async function scanOrganization(
     );
     return stale.length;
   });
-  const candidates = await withTenant(db, organizationId, (tx) =>
-    listNudgeCandidates(tx, organizationId, {
-      idleMinutes: org.idleMinutes,
-      cooldownMinutes: org.idleMinutes,
-    }),
-  );
+}
 
-  const enqueueDraft = deps?.enqueueDraft ?? enqueueGenerateDraft;
-  let nudges = 0;
-  let drafts = 0;
+async function actOnCandidates(
+  ctx: ScanContext,
+  candidates: { id: string }[],
+): Promise<{ nudges: number; drafts: number }> {
+  const counts = { nudges: 0, drafts: 0 };
   for (const candidate of candidates) {
-    if (org.autoDraft) {
-      // The drafter job re-checks credentials and supersedes any card that
-      // landed meanwhile — a skipped enqueue just means no card this cycle.
-      const enqueued = await enqueueDraft({
-        organizationId,
-        conversationId: candidate.id,
-        mode: "suggest",
-      });
-      if (!enqueued.skipped) drafts += 1;
-      continue;
-    }
-    await createNudgeSuggestion(db, organizationId, {
-      conversationId: candidate.id,
-      rationale: `Cliente aguardando resposta há ${org.idleMinutes}+ min`,
-      idleMinutes: org.idleMinutes,
-    });
-    nudges += 1;
+    const kind = await actOnCandidate(ctx, candidate.id);
+    if (kind) counts[kind] += 1;
   }
-  return { nudges, drafts, cleaned };
+  return counts;
+}
+
+/** Enqueues the drafter when the org auto-drafts, else drops a nudge card; null = nothing happened. */
+async function actOnCandidate(
+  { db, org, deps }: ScanContext,
+  conversationId: string,
+): Promise<"nudges" | "drafts" | null> {
+  const { organizationId } = org;
+  if (org.autoDraft) {
+    // The drafter job re-checks credentials and supersedes any card that
+    // landed meanwhile — a skipped enqueue just means no card this cycle.
+    const enqueueDraft = deps?.enqueueDraft ?? enqueueGenerateDraft;
+    const enqueued = await enqueueDraft({ organizationId, conversationId, mode: "suggest" });
+    return enqueued.skipped ? null : "drafts";
+  }
+  await createNudgeSuggestion(db, organizationId, {
+    conversationId,
+    rationale: `Cliente aguardando resposta há ${org.idleMinutes}+ min`,
+    idleMinutes: org.idleMinutes,
+  });
+  return "nudges";
 }

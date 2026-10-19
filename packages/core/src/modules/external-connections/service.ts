@@ -51,8 +51,10 @@ function stateMatches(bundle: GoogleBundle, state: string): boolean {
 export async function saveGoogleClient(
   db: Database,
   ctx: TenantContext,
-  input: SaveGoogleClientInput,
-  oauth: GoogleOAuthClient = createGoogleOAuthClient(),
+  {
+    input,
+    oauth = createGoogleOAuthClient(),
+  }: { input: SaveGoogleClientInput; oauth?: GoogleOAuthClient },
 ): Promise<{ authUrl: string }> {
   assertPermission(ctx, { integrations: ["manage"] });
   const parsed = saveGoogleClientInput.parse(input);
@@ -79,6 +81,23 @@ export async function saveGoogleClient(
   };
 }
 
+/** The pending attempt whose single-use `state` matches, or GOOGLE_STATE_INVALID. */
+async function findPendingAuthorization(db: Database, ctx: TenantContext, state: string) {
+  const pending = await withTenant(db, ctx.organizationId, async (tx) => {
+    const row = await findConnection(tx, ctx.organizationId, PROVIDER);
+    if (row?.status !== "pending") return null;
+    const bundle = openBundle(row);
+    return stateMatches(bundle, state) ? { id: row.id, bundle } : null;
+  });
+  if (!pending) {
+    throw new DomainError(
+      "GOOGLE_STATE_INVALID",
+      "Autorização expirada ou inválida. Conecte de novo.",
+    );
+  }
+  return pending;
+}
+
 /**
  * Requires integrations:manage. Finishes the consent: the `state` must match
  * the pending attempt (single-use, 10 min). A failed exchange parks the
@@ -87,25 +106,14 @@ export async function saveGoogleClient(
 export async function completeGoogleAuthorization(
   db: Database,
   ctx: TenantContext,
-  input: CompleteGoogleAuthorizationInput,
-  oauth: GoogleOAuthClient = createGoogleOAuthClient(),
+  {
+    input,
+    oauth = createGoogleOAuthClient(),
+  }: { input: CompleteGoogleAuthorizationInput; oauth?: GoogleOAuthClient },
 ): Promise<ExternalConnectionPublic> {
   assertPermission(ctx, { integrations: ["manage"] });
   const parsed = completeGoogleAuthorizationInput.parse(input);
-
-  const pending = await withTenant(db, ctx.organizationId, async (tx) => {
-    const row = await findConnection(tx, ctx.organizationId, PROVIDER);
-    if (row?.status !== "pending") return null;
-    const bundle = openBundle(row);
-    return stateMatches(bundle, parsed.state) ? { id: row.id, bundle } : null;
-  });
-  if (!pending) {
-    throw new DomainError(
-      "GOOGLE_STATE_INVALID",
-      "Autorização expirada ou inválida. Conecte de novo.",
-    );
-  }
-
+  const pending = await findPendingAuthorization(db, ctx, parsed.state);
   const { state: _consumed, ...client } = pending.bundle;
   try {
     const { tokens, accountEmail } = await oauth.exchangeCode({
@@ -138,6 +146,36 @@ export async function completeGoogleAuthorization(
   }
 }
 
+type StoredTokens = NonNullable<GoogleBundle["tokens"]>;
+
+/** The connection update for a live token refresh: connected on success, needs_reauth/error on an OAuth failure. */
+async function refreshConnectionUpdate(
+  bundle: GoogleBundle,
+  tokens: StoredTokens,
+  oauth: GoogleOAuthClient,
+): Promise<Parameters<typeof updateConnection>[2]> {
+  try {
+    const refreshed = await oauth.refreshAccessToken({
+      clientId: bundle.clientId,
+      clientSecret: bundle.clientSecret,
+      refreshToken: tokens.refreshToken,
+    });
+    return {
+      status: "connected",
+      bundleEncrypted: encryptJson({ ...bundle, tokens: { ...tokens, ...refreshed } }),
+      lastCheckedAt: new Date(),
+      lastError: null,
+    };
+  } catch (error) {
+    if (!(error instanceof GoogleOAuthError)) throw error;
+    return {
+      status: error.code === "invalid_grant" ? "needs_reauth" : "error",
+      lastCheckedAt: new Date(),
+      lastError: error.code,
+    };
+  }
+}
+
 /**
  * Requires integrations:manage. Re-checks the token live by refreshing it.
  * `invalid_grant` (revoked/expired consent) → `needs_reauth`; any other
@@ -157,27 +195,7 @@ export async function verifyGoogleConnection(
     throw new DomainError("GOOGLE_NOT_CONNECTED", "Nenhuma conta Google conectada.");
   }
 
-  let update: Parameters<typeof updateConnection>[2];
-  try {
-    const refreshed = await oauth.refreshAccessToken({
-      clientId: bundle.clientId,
-      clientSecret: bundle.clientSecret,
-      refreshToken: bundle.tokens.refreshToken,
-    });
-    update = {
-      status: "connected",
-      bundleEncrypted: encryptJson({ ...bundle, tokens: { ...bundle.tokens, ...refreshed } }),
-      lastCheckedAt: new Date(),
-      lastError: null,
-    };
-  } catch (error) {
-    if (!(error instanceof GoogleOAuthError)) throw error;
-    update = {
-      status: error.code === "invalid_grant" ? "needs_reauth" : "error",
-      lastCheckedAt: new Date(),
-      lastError: error.code,
-    };
-  }
+  const update = await refreshConnectionUpdate(bundle, bundle.tokens, oauth);
   return withTenant(db, ctx.organizationId, async (tx) => {
     const updated = await updateConnection(tx, row.id, update);
     if (!updated) throw new NotFoundError("ExternalConnection", row.id);

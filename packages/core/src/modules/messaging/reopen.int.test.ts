@@ -38,11 +38,13 @@ function ctx(organizationId: string, role: TenantContext["role"]): TenantContext
 async function newTicket(channelUserId: string, messageId: string, timestamp: Date) {
   await withTenant(db, orgA, (tx) =>
     ingestChannelEvent(tx, connA, {
-      type: "message.received",
-      externalMessageId: messageId,
-      from: { channelUserId, displayName: "Act" },
-      content: { type: "text", text: "hi" },
-      timestamp,
+      event: {
+        type: "message.received",
+        externalMessageId: messageId,
+        from: { channelUserId, displayName: "Act" },
+        content: { type: "text", text: "hi" },
+        timestamp,
+      },
     }),
   );
   return withTenant(db, orgA, async (tx) => {
@@ -107,9 +109,11 @@ afterAll(async () => {
 describe("reopenTicket", () => {
   it("undoes a resolution inside the window — same ticket, assignee kept", async () => {
     const ticket = await newTicket("re-1@c.us", "false_re1@c.us_1", new Date("2024-04-07"));
-    await pickupConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id });
+    await pickupConversation(db, ctx(orgA, "agent"), { input: { conversationId: ticket.id } });
     const resolved = await resolveConversation(db, ctx(orgA, "agent"), {
-      conversationId: ticket.id,
+      input: {
+        conversationId: ticket.id,
+      },
     });
     expect(resolved.resolvedById).toBe(userId);
 
@@ -126,7 +130,7 @@ describe("reopenTicket", () => {
 
   it("unassigned ticket reopens to the queue (open), not in_progress", async () => {
     const ticket = await newTicket("re-1b@c.us", "false_re1b@c.us_1", new Date("2024-04-07"));
-    await resolveConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id }); // no pickup — never assigned
+    await resolveConversation(db, ctx(orgA, "agent"), { input: { conversationId: ticket.id } }); // no pickup — never assigned
     const reopened = await reopenTicket(db, ctx(orgA, "agent"), { conversationId: ticket.id });
     expect(reopened.status).toBe("open");
     expect(reopened.assigneeId).toBeNull();
@@ -134,7 +138,7 @@ describe("reopenTicket", () => {
 
   it("rejects when the reopen window expired (ticket is effectively closed)", async () => {
     const ticket = await newTicket("re-2@c.us", "false_re2@c.us_1", new Date("2024-04-08"));
-    await resolveConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id });
+    await resolveConversation(db, ctx(orgA, "agent"), { input: { conversationId: ticket.id } });
     // Simulate a resolution older than the default 48h window.
     await withTenant(db, orgA, (tx) =>
       tx
@@ -150,7 +154,7 @@ describe("reopenTicket", () => {
 
   it("rejects when a follow-up ticket is already active for the chat", async () => {
     const ticket = await newTicket("re-3@c.us", "false_re3@c.us_1", new Date("2024-04-09"));
-    await resolveConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id });
+    await resolveConversation(db, ctx(orgA, "agent"), { input: { conversationId: ticket.id } });
     await resumeTicket(db, ctx(orgA, "agent"), { conversationId: ticket.id });
 
     await expect(
@@ -160,7 +164,7 @@ describe("reopenTicket", () => {
 
   it("maps a late-arriving unique violation (drizzle-wrapped) to ACTIVE_TICKET_EXISTS", async () => {
     const ticket = await newTicket("re-3b@c.us", "false_re3b@c.us_1", new Date("2024-04-09"));
-    await resolveConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id });
+    await resolveConversation(db, ctx(orgA, "agent"), { input: { conversationId: ticket.id } });
     await resumeTicket(db, ctx(orgA, "agent"), { conversationId: ticket.id });
 
     // Stage the race: the pre-check sees "no active ticket", then the update
@@ -183,7 +187,7 @@ describe("reopenTicket", () => {
     await expect(
       reopenTicket(db, ctx(orgA, "agent"), { conversationId: ticket.id }),
     ).rejects.toThrowError(/TICKET_NOT_RESOLVED|Only resolved/i);
-    await resolveConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id });
+    await resolveConversation(db, ctx(orgA, "agent"), { input: { conversationId: ticket.id } });
     await expect(
       reopenTicket(db, ctx(orgA, "viewer"), { conversationId: ticket.id }),
     ).rejects.toThrowError(AuthorizationError);
@@ -191,7 +195,7 @@ describe("reopenTicket", () => {
 
   it("is tenant-isolated — another org cannot see (let alone reopen) the ticket", async () => {
     const ticket = await newTicket("re-5@c.us", "false_re5@c.us_1", new Date("2024-04-11"));
-    await resolveConversation(db, ctx(orgA, "agent"), { conversationId: ticket.id });
+    await resolveConversation(db, ctx(orgA, "agent"), { input: { conversationId: ticket.id } });
     // A foreign org context never resolves the row (RLS) → NotFound, not reopen.
     await expect(
       reopenTicket(db, ctx(crypto.randomUUID(), "agent"), { conversationId: ticket.id }),

@@ -42,41 +42,27 @@ function initialForm(contact: EditableContact): FormState {
   };
 }
 
-/** Row action for /app/contacts: edits the profile; saves only what changed, empty clears. */
-export function EditContactButton({ contact }: { contact: EditableContact }) {
-  const t = useTranslations("contacts.edit");
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
+/** Form values plus the baseline they are diffed against; `reload` re-reads the contact. */
+function useProfileDraft(contact: EditableContact) {
   const [baseline, setBaseline] = useState<FormState>(() => initialForm(contact));
   const [form, setFormState] = useState<FormState>(baseline);
-  const [pending, startTransition] = useTransition();
   const setForm = (patch: Partial<FormState>) => setFormState((prev) => ({ ...prev, ...patch }));
-
-  function openDialog() {
+  const reload = () => {
     const fresh = initialForm(contact);
     setBaseline(fresh);
     setFormState(fresh);
-    setOpen(true);
-  }
+  };
+  return { baseline, form, setForm, reload };
+}
 
-  function submit() {
-    const patch = changedProfileFields(baseline, form);
-    if (Object.keys(patch).length === 0) {
-      setOpen(false);
-      return;
-    }
-    startTransition(async () => {
-      const result = await updateContactProfileAction({ contactId: contact.id, ...patch });
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      toast.success(t("saved"));
-      setOpen(false);
-      router.refresh();
-    });
-  }
-
+function ProfileFields({
+  form,
+  setForm,
+}: {
+  form: FormState;
+  setForm: (patch: Partial<FormState>) => void;
+}) {
+  const t = useTranslations("contacts.edit");
   const field = (key: keyof FormState, label: string, props: { maxLength: number }) => (
     <div className="space-y-1.5">
       <Label htmlFor={`edit-${key}`}>{label}</Label>
@@ -104,6 +90,52 @@ export function EditContactButton({ contact }: { contact: EditableContact }) {
   );
 
   return (
+    <div className="space-y-4">
+      {field("displayName", t("name"), { maxLength: 120 })}
+      {field("email", t("email"), { maxLength: 200 })}
+      {field("phone", t("phone"), { maxLength: 32 })}
+      {field("company", t("company"), { maxLength: 120 })}
+      {field("jobTitle", t("jobTitle"), { maxLength: 120 })}
+      {field("birthday", t("birthday"), { maxLength: 10 })}
+      {area("address", t("address"))}
+      {area("urls", t("urls"), t("urlsHint"))}
+      {area("notes", t("notes"))}
+    </div>
+  );
+}
+
+/** Row action for /app/contacts: edits the profile; saves only what changed, empty clears. */
+export function EditContactButton({ contact }: { contact: EditableContact }) {
+  const t = useTranslations("contacts.edit");
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const { baseline, form, setForm, reload } = useProfileDraft(contact);
+  const [pending, startTransition] = useTransition();
+
+  function openDialog() {
+    reload();
+    setOpen(true);
+  }
+
+  function submit() {
+    const patch = changedProfileFields(baseline, form);
+    if (Object.keys(patch).length === 0) {
+      setOpen(false);
+      return;
+    }
+    startTransition(async () => {
+      const result = await updateContactProfileAction({ contactId: contact.id, ...patch });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(t("saved"));
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
     <>
       <Button variant="ghost" size="sm" onClick={openDialog}>
         {t("button")}
@@ -118,17 +150,7 @@ export function EditContactButton({ contact }: { contact: EditableContact }) {
           </Button>
         }
       >
-        <div className="space-y-4">
-          {field("displayName", t("name"), { maxLength: 120 })}
-          {field("email", t("email"), { maxLength: 200 })}
-          {field("phone", t("phone"), { maxLength: 32 })}
-          {field("company", t("company"), { maxLength: 120 })}
-          {field("jobTitle", t("jobTitle"), { maxLength: 120 })}
-          {field("birthday", t("birthday"), { maxLength: 10 })}
-          {area("address", t("address"))}
-          {area("urls", t("urls"), t("urlsHint"))}
-          {area("notes", t("notes"))}
-        </div>
+        <ProfileFields form={form} setForm={setForm} />
       </Dialog>
     </>
   );

@@ -3,26 +3,13 @@ import { emitDomainEvent, withTenant } from "@crm/db";
 import { captureException } from "@crm/observability";
 
 import { AuthorizationError, DomainError, NotFoundError } from "../../errors";
-import { isForeignKeyViolation, isUniqueViolation } from "../../lib/pg-error";
 import type { TenantContext } from "../../tenant/context";
 import { assertPermission } from "../../tenant/context";
-import { createAgentInput, findAgentById, insertAgent, updateAgentRow } from "../agents";
 import { recordAuditEvent } from "../audit";
-import {
-  findMemoryEntryById,
-  insertMemoryEntry,
-  memoryProposalSchema,
-  proposeEntryInput,
-  updateMemoryEntry,
-} from "../brain";
-import {
-  createKnowledgeEntryInput,
-  findEntryById,
-  insertEntry,
-  proposeKnowledgeEntryInput,
-  updateEntry,
-} from "../knowledge";
+import { proposeEntryInput } from "../brain";
+import { proposeKnowledgeEntryInput } from "../knowledge";
 import { proposeMacroInput } from "../macros";
+import { applyPayload } from "./apply";
 import type { AgentSuggestionRow } from "./repository";
 import {
   findSuggestionById,
@@ -37,7 +24,11 @@ import type { CreateSuggestionInput, ListSuggestionsInput } from "./schemas";
 import { createSuggestionInput, listSuggestionsInput, suggestionTargetSchema } from "./schemas";
 
 /** Audit is post-commit best-effort — a logging failure must not fail the mutation. */
-function audit(db: Database, ctx: TenantContext, action: string, suggestionId: string): void {
+function audit(
+  db: Database,
+  ctx: TenantContext,
+  { action, id: suggestionId }: { action: string; id: string },
+): void {
   recordAuditEvent(db, ctx, {
     action,
     targetType: "agent_suggestion",
@@ -270,124 +261,6 @@ export async function createSystemSuggestions(
   });
 }
 
-async function applyAgentPayload(
-  executor: DbExecutor,
-  organizationId: string,
-  targetId: string | null,
-  payload: unknown,
-): Promise<void> {
-  if (targetId) {
-    const existing = await findAgentById(executor, organizationId, targetId);
-    if (!existing) throw new NotFoundError("Agent", targetId);
-    await updateAgentRow(executor, existing.id, createAgentInput.partial().parse(payload));
-  } else {
-    await insertAgent(executor, { organizationId, ...createAgentInput.parse(payload) });
-  }
-}
-
-async function applyKnowledgePayload(
-  executor: DbExecutor,
-  organizationId: string,
-  targetId: string | null,
-  payload: unknown,
-): Promise<void> {
-  if (targetId) {
-    const existing = await findEntryById(executor, organizationId, targetId);
-    if (!existing) throw new NotFoundError("KnowledgeEntry", targetId);
-    await updateEntry(executor, existing.id, createKnowledgeEntryInput.partial().parse(payload));
-  } else {
-    await insertEntry(executor, {
-      organizationId,
-      ...createKnowledgeEntryInput.parse(payload),
-      source: "suggestion",
-    });
-  }
-}
-
-/**
- * Memory apply — payload describes the canon entry to promote. A
- * `supersedes` link retires the previous entry in the same transaction
- * (temporal chain instead of destructive update).
- */
-async function applyMemoryPayload(
-  executor: DbExecutor,
-  suggestion: AgentSuggestionRow,
-  reviewerId: string,
-): Promise<void> {
-  const proposal = memoryProposalSchema.parse(suggestion.payload);
-  let supersedesId: string | null = null;
-  if (proposal.supersedes) {
-    const old = await findMemoryEntryById(executor, suggestion.organizationId, proposal.supersedes);
-    if (!old) throw new NotFoundError("MemoryEntry", proposal.supersedes);
-    if (old.status !== "canon") {
-      throw new DomainError("MEMORY_ALREADY_SUPERSEDED", old.status);
-    }
-    supersedesId = old.id;
-  }
-  if (!(await scopeRefsExist(executor, suggestion.organizationId, proposal))) {
-    throw new DomainError("MEMORY_SCOPE_REF_INVALID", "teamId/contactId not found in org");
-  }
-  const entry = await insertMemoryEntry(executor, {
-    organizationId: suggestion.organizationId,
-    type: proposal.type,
-    scope: proposal.scope,
-    teamId: proposal.teamId ?? null,
-    contactId: proposal.contactId ?? null,
-    content: proposal.content,
-    confidence: proposal.confidence,
-    staleAfter: new Date(Date.now() + proposal.staleAfterDays * 86_400_000),
-    sources: {
-      conversations: proposal.sourceConversationIds,
-      suggestion: suggestion.id,
-      proposedBy: suggestion.proposedBy,
-    },
-    verifiedBy: reviewerId,
-  });
-  if (supersedesId) {
-    await updateMemoryEntry(executor, supersedesId, {
-      status: "superseded",
-      supersededBy: entry.id,
-    });
-  }
-}
-
-/**
- * Applies the payload diff to the target entity inside the caller's
- * tenant-scoped transaction. `targetId` null means the suggestion creates
- * a new entity (payload must satisfy the full create schema).
- */
-async function applyPayload(
-  executor: DbExecutor,
-  suggestion: AgentSuggestionRow,
-  reviewerId: string,
-): Promise<void> {
-  const targetId = suggestion.targetId ?? null;
-  try {
-    if (suggestion.targetType === "agent") {
-      await applyAgentPayload(executor, suggestion.organizationId, targetId, suggestion.payload);
-    } else if (suggestion.targetType === "knowledge_entry") {
-      await applyKnowledgePayload(
-        executor,
-        suggestion.organizationId,
-        targetId,
-        suggestion.payload,
-      );
-    } else if (suggestion.targetType === "memory") {
-      await applyMemoryPayload(executor, suggestion, reviewerId);
-    } else {
-      throw new DomainError("SUGGESTION_TARGET_UNSUPPORTED", suggestion.targetType);
-    }
-  } catch (error) {
-    if (isUniqueViolation(error) || isForeignKeyViolation(error)) {
-      throw new DomainError(
-        "SUGGESTION_APPLY_CONFLICT",
-        "Suggestion payload conflicts with an existing record",
-      );
-    }
-    throw error;
-  }
-}
-
 /**
  * Conversation-scoped targets (drafts…) have their own review services —
  * the generic review path only handles configuration-class suggestions.
@@ -408,6 +281,41 @@ function assertConfigSuggestion(ctx: TenantContext, suggestion: AgentSuggestionR
   }
 }
 
+async function loadForReview(
+  tx: DbExecutor,
+  ctx: TenantContext,
+  suggestionId: string,
+): Promise<AgentSuggestionRow> {
+  const suggestion = await findSuggestionById(tx, ctx.organizationId, suggestionId);
+  if (!suggestion) throw new NotFoundError("AgentSuggestion", suggestionId);
+  assertConfigSuggestion(ctx, suggestion);
+  return suggestion;
+}
+
+function assertPending(suggestion: AgentSuggestionRow): void {
+  if (suggestion.status !== "pending") {
+    throw new DomainError("SUGGESTION_ALREADY_REVIEWED", suggestion.status);
+  }
+}
+
+async function finishReview(
+  tx: DbExecutor,
+  ctx: TenantContext,
+  { suggestionId, status }: { suggestionId: string; status: "approved" | "rejected" },
+): Promise<AgentSuggestionRow> {
+  const row = await markSuggestionReviewed(tx, suggestionId, {
+    status,
+    reviewedBy: ctx.userId,
+  });
+  if (!row) throw new NotFoundError("AgentSuggestion", suggestionId);
+  await emitDomainEvent(tx, {
+    type: "agent_suggestion.reviewed",
+    organizationId: ctx.organizationId,
+    suggestionId,
+  });
+  return row;
+}
+
 /** Requires ai:manage. Idempotent: re-approving returns the row unchanged. */
 export async function approveSuggestion(
   db: Database,
@@ -416,32 +324,18 @@ export async function approveSuggestion(
 ): Promise<AgentSuggestionRow> {
   assertPermission(ctx, { ai: ["manage"] });
   const reviewed = await withTenant(db, ctx.organizationId, async (tx) => {
-    const suggestion = await findSuggestionById(tx, ctx.organizationId, suggestionId);
-    if (!suggestion) throw new NotFoundError("AgentSuggestion", suggestionId);
-    assertConfigSuggestion(ctx, suggestion);
+    const suggestion = await loadForReview(tx, ctx, suggestionId);
     if (suggestion.status === "approved") return suggestion;
-    if (suggestion.status !== "pending") {
-      throw new DomainError("SUGGESTION_ALREADY_REVIEWED", suggestion.status);
-    }
+    assertPending(suggestion);
     // Four-eyes: the proposer can't approve their own suggestion — except
     // the owner, who is sovereign (single-person orgs have no reviewer #2).
     if (suggestion.proposedBy === ctx.userId && ctx.role !== "owner" && !ctx.isPlatformAdmin) {
       throw new DomainError("SUGGESTION_SELF_APPROVE", "proposer cannot self-approve");
     }
     await applyPayload(tx, suggestion, ctx.userId);
-    const row = await markSuggestionReviewed(tx, suggestionId, {
-      status: "approved",
-      reviewedBy: ctx.userId,
-    });
-    if (!row) throw new NotFoundError("AgentSuggestion", suggestionId);
-    await emitDomainEvent(tx, {
-      type: "agent_suggestion.reviewed",
-      organizationId: ctx.organizationId,
-      suggestionId,
-    });
-    return row;
+    return finishReview(tx, ctx, { suggestionId, status: "approved" });
   });
-  audit(db, ctx, "agent_suggestion.approved", suggestionId);
+  audit(db, ctx, { action: "agent_suggestion.approved", id: suggestionId });
   return reviewed;
 }
 
@@ -453,25 +347,11 @@ export async function rejectSuggestion(
 ): Promise<AgentSuggestionRow> {
   assertPermission(ctx, { ai: ["manage"] });
   const reviewed = await withTenant(db, ctx.organizationId, async (tx) => {
-    const suggestion = await findSuggestionById(tx, ctx.organizationId, suggestionId);
-    if (!suggestion) throw new NotFoundError("AgentSuggestion", suggestionId);
-    assertConfigSuggestion(ctx, suggestion);
+    const suggestion = await loadForReview(tx, ctx, suggestionId);
     if (suggestion.status === "rejected") return suggestion;
-    if (suggestion.status !== "pending") {
-      throw new DomainError("SUGGESTION_ALREADY_REVIEWED", suggestion.status);
-    }
-    const row = await markSuggestionReviewed(tx, suggestionId, {
-      status: "rejected",
-      reviewedBy: ctx.userId,
-    });
-    if (!row) throw new NotFoundError("AgentSuggestion", suggestionId);
-    await emitDomainEvent(tx, {
-      type: "agent_suggestion.reviewed",
-      organizationId: ctx.organizationId,
-      suggestionId,
-    });
-    return row;
+    assertPending(suggestion);
+    return finishReview(tx, ctx, { suggestionId, status: "rejected" });
   });
-  audit(db, ctx, "agent_suggestion.rejected", suggestionId);
+  audit(db, ctx, { action: "agent_suggestion.rejected", id: suggestionId });
   return reviewed;
 }

@@ -31,8 +31,8 @@ const config = [
         },
       ],
       "shadcn/no-raw-colors": "error",
-      "shadcn/no-inline-styles": "warn",
-      "shadcn/require-static-classes": "warn",
+      "shadcn/no-inline-styles": "error",
+      "shadcn/require-static-classes": "error",
       "shadcn/no-unknown-classes": [
         "error",
         {

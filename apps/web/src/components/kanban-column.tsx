@@ -29,7 +29,42 @@ function StageHeader({ stage, count }: { stage: StageRow; count: number }) {
   );
 }
 
+function ColumnCards({
+  deals,
+  stages,
+  canWrite,
+  canManage,
+  cardCallbacks,
+}: Pick<ColumnProps, "deals" | "stages" | "canWrite" | "canManage" | "cardCallbacks">) {
+  return (
+    <SortableContext items={deals.map((d) => d.id)} strategy={verticalListSortingStrategy}>
+      <div className="flex min-h-16 flex-col gap-2">
+        {deals.map((deal) => (
+          <SortableDealCard
+            key={deal.id}
+            deal={deal}
+            stages={stages}
+            canWrite={canWrite}
+            canManage={canManage}
+            {...cardCallbacks}
+          />
+        ))}
+      </div>
+    </SortableContext>
+  );
+}
+
 /** Droppable kanban column: stage header + sortable deal cards + "add deal". */
+type ColumnProps = {
+  stage: StageRow;
+  stages: StageRow[];
+  deals: DealCardRow[];
+  canWrite: boolean;
+  canManage: boolean;
+  cardCallbacks: CardCallbacks;
+  onAddDeal: () => void;
+};
+
 export function KanbanStageColumn({
   stage,
   stages,
@@ -38,15 +73,7 @@ export function KanbanStageColumn({
   canManage,
   cardCallbacks,
   onAddDeal,
-}: {
-  stage: StageRow;
-  stages: StageRow[];
-  deals: DealCardRow[];
-  canWrite: boolean;
-  canManage: boolean;
-  cardCallbacks: CardCallbacks;
-  onAddDeal: () => void;
-}) {
+}: ColumnProps) {
   const t = useTranslations("leads");
   const { setNodeRef, isOver } = useDroppable({ id: stage.id, data: { type: "stage" } });
   return (
@@ -59,20 +86,13 @@ export function KanbanStageColumn({
       )}
     >
       <StageHeader stage={stage} count={deals.length} />
-      <SortableContext items={deals.map((d) => d.id)} strategy={verticalListSortingStrategy}>
-        <div className="flex min-h-16 flex-col gap-2">
-          {deals.map((deal) => (
-            <SortableDealCard
-              key={deal.id}
-              deal={deal}
-              stages={stages}
-              canWrite={canWrite}
-              canManage={canManage}
-              {...cardCallbacks}
-            />
-          ))}
-        </div>
-      </SortableContext>
+      <ColumnCards
+        deals={deals}
+        stages={stages}
+        canWrite={canWrite}
+        canManage={canManage}
+        cardCallbacks={cardCallbacks}
+      />
       {canWrite && (
         <Button
           variant="ghost"

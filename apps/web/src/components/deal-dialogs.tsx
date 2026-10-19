@@ -14,6 +14,7 @@ import { useState, useTransition } from "react";
 
 import { NewContactDialog } from "@/components/contact-dialogs";
 import { ContactSelect } from "@/components/contact-select";
+import { useOnOpen } from "@/lib/use-on-open";
 import { createDealAction, updateDealAction } from "@/server/actions/leads";
 
 function toReais(valueCents: number): string {
@@ -44,6 +45,46 @@ function rowsToAttrs(rows: AttrRow[]): Record<string, string> {
   return out;
 }
 
+function AttrRowEditor({
+  row,
+  onChange,
+  onRemove,
+}: {
+  row: AttrRow;
+  onChange: (patch: Partial<AttrRow>) => void;
+  onRemove: () => void;
+}) {
+  const t = useTranslations("leads");
+  return (
+    <div className="flex gap-2">
+      <Input
+        shape="rounded"
+        value={row.key}
+        onChange={(e) => onChange({ key: e.target.value })}
+        placeholder={t("dealForm.attrKey")}
+        className="w-2/5"
+        maxLength={100}
+      />
+      <Input
+        shape="rounded"
+        value={row.value}
+        onChange={(e) => onChange({ value: e.target.value })}
+        placeholder={t("dealForm.attrValue")}
+        className="flex-1"
+        maxLength={500}
+      />
+      <IconButton
+        type="button"
+        variant="ghost"
+        size="sm"
+        icon="x"
+        label={t("dealForm.removeField")}
+        onClick={onRemove}
+      />
+    </div>
+  );
+}
+
 function CustomAttrsFields({
   attrs,
   setAttrs,
@@ -56,36 +97,14 @@ function CustomAttrsFields({
     <div className="space-y-1.5">
       <Label>{t("dealForm.customAttrs")}</Label>
       {attrs.map((row, index) => (
-        <div key={index} className="flex gap-2">
-          <Input
-            shape="rounded"
-            value={row.key}
-            onChange={(e) =>
-              setAttrs(attrs.map((r, i) => (i === index ? { ...r, key: e.target.value } : r)))
-            }
-            placeholder={t("dealForm.attrKey")}
-            className="w-2/5"
-            maxLength={100}
-          />
-          <Input
-            shape="rounded"
-            value={row.value}
-            onChange={(e) =>
-              setAttrs(attrs.map((r, i) => (i === index ? { ...r, value: e.target.value } : r)))
-            }
-            placeholder={t("dealForm.attrValue")}
-            className="flex-1"
-            maxLength={500}
-          />
-          <IconButton
-            type="button"
-            variant="ghost"
-            size="sm"
-            icon="x"
-            label={t("dealForm.removeField")}
-            onClick={() => setAttrs(attrs.filter((_, i) => i !== index))}
-          />
-        </div>
+        <AttrRowEditor
+          key={index}
+          row={row}
+          onChange={(patch) =>
+            setAttrs(attrs.map((r, i) => (i === index ? { ...r, ...patch } : r)))
+          }
+          onRemove={() => setAttrs(attrs.filter((_, i) => i !== index))}
+        />
       ))}
       <Button
         type="button"
@@ -116,71 +135,30 @@ interface DealFormState {
   attrs: AttrRow[];
 }
 
-function DealFormFields({
-  editing,
-  stages,
-  form,
-  setForm,
-}: {
+type FormFieldsProps = {
   editing: boolean;
   stages: StageRow[];
   form: DealFormState;
   setForm: (patch: Partial<DealFormState>) => void;
-}) {
+};
+
+function DealContactField({ form, setForm }: Pick<FormFieldsProps, "form" | "setForm">) {
   const t = useTranslations("leads");
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [contactBump, setContactBump] = useState(0);
   return (
-    <div className="space-y-4">
-      <div className="space-y-1.5">
-        <Label htmlFor="deal-title">{t("dealForm.title")}</Label>
-        <Input
-          shape="rounded"
-          id="deal-title"
-          value={form.title}
-          onChange={(e) => setForm({ title: e.target.value })}
-          maxLength={200}
-        />
-      </div>
-      {!editing && (
-        <div className="space-y-1.5">
-          <Label>{t("dealForm.contact")}</Label>
-          <ContactSelect
-            value={form.contactId}
-            onChange={(contactId) => setForm({ contactId })}
-            refreshKey={contactBump}
-            onCreateClick={(query) => {
-              setCreateName(query);
-              setCreateOpen(true);
-            }}
-          />
-        </div>
-      )}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="deal-stage">{t("dealForm.stage")}</Label>
-          <Select
-            options={stages.map((s) => ({ value: s.id, label: s.name }))}
-            value={form.stageId || undefined}
-            onChange={(stageId) => setForm({ stageId })}
-            disabled={editing}
-            id="deal-stage"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="deal-value">{t("dealForm.value")}</Label>
-          <Input
-            shape="rounded"
-            id="deal-value"
-            value={form.value}
-            onChange={(e) => setForm({ value: e.target.value })}
-            placeholder="0,00"
-            inputMode="decimal"
-          />
-        </div>
-      </div>
-      <CustomAttrsFields attrs={form.attrs} setAttrs={(attrs) => setForm({ attrs })} />
+    <div className="space-y-1.5">
+      <Label>{t("dealForm.contact")}</Label>
+      <ContactSelect
+        value={form.contactId}
+        onChange={(contactId) => setForm({ contactId })}
+        refreshKey={contactBump}
+        onCreateClick={(query) => {
+          setCreateName(query);
+          setCreateOpen(true);
+        }}
+      />
       <NewContactDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
@@ -194,25 +172,66 @@ function DealFormFields({
   );
 }
 
-export function DealFormDialog({
-  funnelId,
-  stages,
-  defaultStageId,
-  deal,
-  open,
-  onOpenChange,
-}: {
-  funnelId: string;
-  stages: StageRow[];
-  defaultStageId?: string;
-  deal?: DealCardRow;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
+function StageValueFields({ editing, stages, form, setForm }: FormFieldsProps) {
   const t = useTranslations("leads");
-  const tc = useTranslations("common");
-  const router = useRouter();
-  const editing = Boolean(deal);
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-1.5">
+        <Label htmlFor="deal-stage">{t("dealForm.stage")}</Label>
+        <Select
+          options={stages.map((s) => ({ value: s.id, label: s.name }))}
+          value={form.stageId || undefined}
+          onChange={(stageId) => setForm({ stageId })}
+          disabled={editing}
+          id="deal-stage"
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="deal-value">{t("dealForm.value")}</Label>
+        <Input
+          shape="rounded"
+          id="deal-value"
+          value={form.value}
+          onChange={(e) => setForm({ value: e.target.value })}
+          placeholder="0,00"
+          inputMode="decimal"
+        />
+      </div>
+    </div>
+  );
+}
+
+function DealFormFields(props: FormFieldsProps) {
+  const { editing, form, setForm } = props;
+  const t = useTranslations("leads");
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <Label htmlFor="deal-title">{t("dealForm.title")}</Label>
+        <Input
+          shape="rounded"
+          id="deal-title"
+          value={form.title}
+          onChange={(e) => setForm({ title: e.target.value })}
+          maxLength={200}
+        />
+      </div>
+      {!editing && <DealContactField form={form} setForm={setForm} />}
+      <StageValueFields {...props} />
+      <CustomAttrsFields attrs={form.attrs} setAttrs={(attrs) => setForm({ attrs })} />
+    </div>
+  );
+}
+
+type DealFormArgs = {
+  deal: DealCardRow | undefined;
+  defaultStageId: string | undefined;
+  stages: StageRow[];
+  open: boolean;
+};
+
+/** Form state, reset each time the dialog opens (mounted once, reused for create/edit). */
+function useDealForm({ deal, defaultStageId, stages, open }: DealFormArgs) {
   const initialForm = (): DealFormState => ({
     title: deal?.title ?? "",
     stageId: pickStageId(deal, defaultStageId, stages),
@@ -221,37 +240,44 @@ export function DealFormDialog({
     attrs: attrsToRows(deal?.customAttributes ?? {}),
   });
   const [form, setFormState] = useState<DealFormState>(initialForm);
-  // Reset the form each time the dialog opens (mounted once, reused for create/edit).
-  const [wasOpen, setWasOpen] = useState(open);
-  if (wasOpen !== open) {
-    setWasOpen(open);
-    if (open) setFormState(initialForm());
-  }
-  const [pending, startTransition] = useTransition();
+  useOnOpen(open, () => setFormState(initialForm()));
   const setForm = (patch: Partial<DealFormState>) =>
     setFormState((prev) => ({ ...prev, ...patch }));
+  return { form, setForm };
+}
+
+type DealDialogProps = {
+  funnelId: string;
+  stages: StageRow[];
+  defaultStageId?: string;
+  deal?: DealCardRow;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+};
+
+function useDealSubmit(props: DealDialogProps, form: DealFormState) {
+  const { funnelId, deal, onOpenChange } = props;
+  const t = useTranslations("leads");
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
   const { title, stageId, contactId, value, attrs } = form;
 
   function submit() {
     startTransition(async () => {
       const valueCents = value.trim() ? fromReais(value) : undefined;
-      const result = editing
-        ? await updateDealAction({
-            dealId: deal!.id,
-            title,
-            valueCents,
-            customAttributes: rowsToAttrs(attrs),
-          })
+      const customAttributes = rowsToAttrs(attrs);
+      const result = deal
+        ? await updateDealAction({ dealId: deal.id, title, valueCents, customAttributes })
         : await createDealAction({
             funnelId,
             stageId,
             contactId,
             title,
             valueCents,
-            customAttributes: rowsToAttrs(attrs),
+            customAttributes,
           });
       if (result.ok) {
-        toast.success(editing ? t("dealForm.updated") : t("dealForm.created"));
+        toast.success(deal ? t("dealForm.updated") : t("dealForm.created"));
         onOpenChange(false);
         router.refresh();
       } else {
@@ -259,8 +285,17 @@ export function DealFormDialog({
       }
     });
   }
+  return { submit, pending };
+}
 
-  const canSubmit = title.trim() && stageId && (editing || contactId) && !pending;
+export function DealFormDialog(props: DealDialogProps) {
+  const { stages, defaultStageId, deal, open, onOpenChange } = props;
+  const t = useTranslations("leads");
+  const tc = useTranslations("common");
+  const editing = Boolean(deal);
+  const { form, setForm } = useDealForm({ deal, defaultStageId, stages, open });
+  const { submit, pending } = useDealSubmit(props, form);
+  const canSubmit = form.title.trim() && form.stageId && (editing || form.contactId) && !pending;
 
   return (
     <Dialog

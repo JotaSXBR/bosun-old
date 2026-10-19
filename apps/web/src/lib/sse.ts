@@ -28,7 +28,7 @@ function ensureSource(): EventSource {
  * EventSource closes once the last subscriber leaves.
  */
 export function subscribeToDomainEvents(listener: (event: DomainEvent) => void): () => void {
-  if (typeof window === "undefined") return () => {};
+  if (typeof window === "undefined") return () => undefined;
   listeners.add(listener);
   ensureSource();
   return () => {

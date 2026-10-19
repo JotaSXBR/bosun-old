@@ -1,4 +1,4 @@
-import type { Database } from "@crm/db";
+import type { Database, DbExecutor } from "@crm/db";
 import { withTenant } from "@crm/db";
 
 import { DomainError, NotFoundError } from "../../errors";
@@ -49,7 +49,7 @@ export async function createDeal(
       customAttributes: parsed.customAttributes ?? {},
     });
   });
-  audit(db, ctx, "deal.created", deal.id);
+  audit(db, ctx, { action: "deal.created", id: deal.id });
   return deal;
 }
 
@@ -99,7 +99,7 @@ export async function createDealFromConversation(
     }
     throw error;
   }
-  audit(db, ctx, "deal.created_from_conversation", deal.id);
+  audit(db, ctx, { action: "deal.created_from_conversation", id: deal.id });
   return deal;
 }
 
@@ -140,25 +140,31 @@ export async function moveDeal(
     if (stage?.funnelId !== deal.funnelId) {
       throw new NotFoundError("Stage", parsed.stageId);
     }
-    const sourceStageId = deal.stageId;
-    const targetIds = (await repo.listDealIdsInStage(tx, parsed.stageId)).filter(
-      (id) => id !== deal.id,
-    );
-    const position = Math.min(parsed.position, targetIds.length);
-    targetIds.splice(position, 0, deal.id);
-    await repo.updateDeal(tx, deal.id, { stageId: parsed.stageId, position });
-    for (const [index, dealId] of targetIds.entries()) {
-      if (dealId !== deal.id) await repo.setDealPosition(tx, dealId, index);
-    }
-    if (sourceStageId !== parsed.stageId) {
-      const remaining = await repo.listDealIdsInStage(tx, sourceStageId);
-      for (const [index, dealId] of remaining.entries()) {
-        await repo.setDealPosition(tx, dealId, index);
-      }
-    }
+    await placeInStage(tx, deal, parsed);
+    if (deal.stageId !== parsed.stageId) await renumberStage(tx, deal.stageId);
     const updated = await repo.findDealById(tx, ctx.organizationId, deal.id);
     return updated ?? deal;
   });
+}
+
+/** Inserts the deal at the clamped position of the target stage and renumbers its siblings. */
+async function placeInStage(tx: DbExecutor, deal: DealRow, target: MoveDealInput): Promise<void> {
+  const targetIds = (await repo.listDealIdsInStage(tx, target.stageId)).filter(
+    (id) => id !== deal.id,
+  );
+  const position = Math.min(target.position, targetIds.length);
+  targetIds.splice(position, 0, deal.id);
+  await repo.updateDeal(tx, deal.id, { stageId: target.stageId, position });
+  for (const [index, dealId] of targetIds.entries()) {
+    if (dealId !== deal.id) await repo.setDealPosition(tx, dealId, index);
+  }
+}
+
+async function renumberStage(tx: DbExecutor, stageId: string): Promise<void> {
+  const remaining = await repo.listDealIdsInStage(tx, stageId);
+  for (const [index, dealId] of remaining.entries()) {
+    await repo.setDealPosition(tx, dealId, index);
+  }
 }
 
 /** Requires leads:manage (destructive). */
@@ -167,7 +173,7 @@ export async function deleteDeal(db: Database, ctx: TenantContext, dealId: strin
   await withTenant(db, ctx.organizationId, async (tx) => {
     if (!(await repo.deleteDeal(tx, dealId))) throw new NotFoundError("Deal", dealId);
   });
-  audit(db, ctx, "deal.deleted", dealId);
+  audit(db, ctx, { action: "deal.deleted", id: dealId });
 }
 
 /** Deal linked to a conversation, if any. Requires leads:read. */
@@ -183,9 +189,13 @@ export async function getDealForConversation(
 }
 
 /** Contact picker for "new deal". Requires leads:read. */
-export async function searchContacts(db: Database, ctx: TenantContext, query?: string, limit = 20) {
+export async function searchContacts(
+  db: Database,
+  ctx: TenantContext,
+  { query, limit = 20 }: { query?: string; limit?: number } = {},
+) {
   assertPermission(ctx, { leads: ["read"] });
   return withTenant(db, ctx.organizationId, (tx) =>
-    repo.searchContacts(tx, ctx.organizationId, query, limit),
+    repo.searchContacts(tx, ctx.organizationId, { query, limit }),
   );
 }

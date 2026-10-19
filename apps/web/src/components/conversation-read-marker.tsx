@@ -19,7 +19,7 @@ export function ConversationReadMarker({
   lastInboundKey?: string | null;
 }) {
   useEffect(() => {
-    markConversationReadAction({ conversationId }).catch(() => {});
+    markConversationReadAction({ conversationId }).catch(() => undefined);
   }, [conversationId, lastInboundKey]);
   return null;
 }

@@ -1,3 +1,4 @@
+import type { ChannelProvider } from "@crm/channels";
 import { getServerEnv, isConfigured } from "@crm/config";
 import { updateContactAvatar } from "@crm/core/contacts";
 import { providerForConnection } from "@crm/core/integrations";
@@ -35,6 +36,29 @@ function storage(): StorageProvider | null {
   return cachedStorage;
 }
 
+type Avatar = NonNullable<Awaited<ReturnType<NonNullable<ChannelProvider["fetchContactAvatar"]>>>>;
+type AvatarUpdate = { avatarUrl?: string; avatarKey?: string };
+
+/**
+ * Only points avatarUrl at the proxy when the bytes actually landed — a URL
+ * without the object would 404 forever (fetchedAt is stamped either way, so
+ * a missing bucket wouldn't retry).
+ */
+async function storeAvatar(
+  organizationId: string,
+  contactId: string,
+  avatar: Avatar,
+): Promise<AvatarUpdate> {
+  const store = storage();
+  if (!store) {
+    logger.warn("contact-avatar: storage not configured, skipping upload");
+    return {};
+  }
+  const key = tenantObjectKey(organizationId, "contact-avatar", contactId);
+  await store.upload({ key, body: avatar.body, contentType: avatar.contentType ?? undefined });
+  return { avatarUrl: `/api/contacts/${contactId}/avatar`, avatarKey: key };
+}
+
 /**
  * Pulls the contact's profile picture from the channel provider into our
  * object storage and points `contacts.avatarUrl` at the authenticated
@@ -52,25 +76,7 @@ export async function contactAvatarHandler(payload: unknown): Promise<{ ok: bool
   const avatar = provider.fetchContactAvatar
     ? await provider.fetchContactAvatar(parsed.channelUserId)
     : null;
-
-  // Only point avatarUrl at the proxy when the bytes actually landed —
-  // a URL without the object would 404 forever (fetchedAt is stamped
-  // either way, so a missing bucket wouldn't retry).
-  let update: { avatarUrl?: string; avatarKey?: string } = {};
-  if (avatar) {
-    const store = storage();
-    if (store) {
-      const key = tenantObjectKey(parsed.organizationId, "contact-avatar", parsed.contactId);
-      await store.upload({
-        key,
-        body: avatar.body,
-        contentType: avatar.contentType ?? undefined,
-      });
-      update = { avatarUrl: `/api/contacts/${parsed.contactId}/avatar`, avatarKey: key };
-    } else {
-      logger.warn("contact-avatar: storage not configured, skipping upload");
-    }
-  }
+  const update = avatar ? await storeAvatar(parsed.organizationId, parsed.contactId, avatar) : {};
   await withTenant(db, parsed.organizationId, (tx) =>
     updateContactAvatar(tx, parsed.contactId, update),
   );

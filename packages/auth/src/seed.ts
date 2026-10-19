@@ -52,8 +52,7 @@ type SeedAuth = ReturnType<typeof createAuth>;
 async function ensureUser(
   db: SeedDb,
   auth: SeedAuth,
-  email: string,
-  name: string,
+  { email, name }: { email: string; name: string },
 ): Promise<string> {
   const existing = await db
     .select({ id: schema.users.id })
@@ -158,44 +157,63 @@ async function ensureDemoData(
   await ensureDemoFunnel(db, orgId);
 }
 
-async function main() {
-  const env = getServerEnv();
-  if (env.nodeEnv === "production") {
-    throw new Error("db:seed refuses to run when NODE_ENV=production");
-  }
-
-  const db = createDb(env.database.adminUrl ?? env.database.url);
-  const auth = createAuth({ db, env });
-
-  // Platform admin (users.role drives the better-auth admin plugin).
-  const platformAdminId = await ensureUser(db, auth, PLATFORM_ADMIN.email, PLATFORM_ADMIN.name);
+async function ensurePlatformAdmin(db: SeedDb, auth: SeedAuth): Promise<void> {
+  // users.role drives the better-auth admin plugin.
+  const platformAdminId = await ensureUser(db, auth, PLATFORM_ADMIN);
   await db
     .update(schema.users)
     .set({ role: "platform_admin" })
     .where(eq(schema.users.id, platformAdminId));
+}
 
-  const orgId = await ensureDemoOrg(db);
+async function ensureOrgMembers(
+  db: SeedDb,
+  auth: SeedAuth,
+  orgId: string,
+): Promise<Map<string, string>> {
   const userIdByRole = new Map<string, string>();
   for (const user of USERS) {
-    const userId = await ensureUser(db, auth, user.email, user.name);
+    const userId = await ensureUser(db, auth, user);
     userIdByRole.set(user.orgRole, userId);
     await db
       .insert(schema.organizationMembers)
       .values({ organizationId: orgId, userId, role: user.orgRole })
       .onConflictDoNothing();
   }
+  return userIdByRole;
+}
 
-  await ensureDemoData(db, orgId, userIdByRole);
-  await ensureDemoContent(db, orgId, userIdByRole);
-
-  await db.$client.end();
-
+function printSummary(): void {
   console.log("Seed complete:");
   console.log(`  platform admin: ${PLATFORM_ADMIN.email} / ${PASSWORD}`);
   console.log(`  demo org "${DEMO_ORG.name}" (slug: ${DEMO_ORG.slug}):`);
   for (const user of USERS) {
     console.log(`    ${user.orgRole.padEnd(8)} ${user.email} / ${PASSWORD}`);
   }
+}
+
+function openSeedContext(): { db: SeedDb; auth: SeedAuth } {
+  const env = getServerEnv();
+  if (env.nodeEnv === "production") {
+    throw new Error("db:seed refuses to run when NODE_ENV=production");
+  }
+  const db = createDb(env.database.adminUrl ?? env.database.url);
+  return { db, auth: createAuth({ db, env }) };
+}
+
+async function main() {
+  const { db, auth } = openSeedContext();
+
+  await ensurePlatformAdmin(db, auth);
+  const orgId = await ensureDemoOrg(db);
+  const userIdByRole = await ensureOrgMembers(db, auth, orgId);
+
+  await ensureDemoData(db, orgId, userIdByRole);
+  await ensureDemoContent(db, orgId, userIdByRole);
+
+  await db.$client.end();
+
+  printSummary();
 }
 
 main().catch((error) => {

@@ -1,12 +1,16 @@
 import { enqueueChannelEventProcessed } from "@crm/automation";
-import { NotFoundError } from "@crm/core";
 import { sendWidgetMessage } from "@crm/core/messaging";
 import { getDb } from "@crm/db";
-import { captureException } from "@crm/observability";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { corsJson, corsOptions, rateLimit } from "../../../../lib/widget-http";
+import {
+  corsJson,
+  corsOptions,
+  parseJsonBody,
+  rateLimit,
+  widgetErrorResponse,
+} from "../../../../lib/widget-http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,32 +31,19 @@ export function OPTIONS(): Response {
  * the process-channel-event job come for free).
  */
 export async function POST(request: NextRequest): Promise<Response> {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return corsJson({ ok: false, error: "invalid_json" }, { status: 400 });
-  }
-  const parsed = widgetMessageInput.safeParse(body);
-  if (!parsed.success) {
-    return corsJson({ ok: false, error: "invalid_input" }, { status: 400 });
-  }
-  if (!rateLimit(`widget:message:${parsed.data.sessionToken}`, 30, 60_000)) {
+  const input = await parseJsonBody(request, widgetMessageInput);
+  if ("response" in input) return input.response;
+  const { sessionToken, text, clientMessageId } = input.data;
+  if (!rateLimit(`widget:message:${sessionToken}`, 30, 60_000)) {
     return corsJson({ ok: false, error: "rate_limited" }, { status: 429 });
   }
   try {
-    await sendWidgetMessage(
-      getDb(),
-      parsed.data.sessionToken,
-      { text: parsed.data.text, clientMessageId: parsed.data.clientMessageId },
-      { enqueue: (executor, payload) => enqueueChannelEventProcessed(payload, executor) },
-    );
+    await sendWidgetMessage(getDb(), sessionToken, {
+      input: { text, clientMessageId },
+      deps: { enqueue: (executor, payload) => enqueueChannelEventProcessed(payload, executor) },
+    });
     return corsJson({ ok: true });
   } catch (error) {
-    if (error instanceof NotFoundError) {
-      return corsJson({ ok: false, error: "unknown_session" }, { status: 404 });
-    }
-    captureException(error, { route: "widget.message" });
-    return corsJson({ ok: false, error: "internal" }, { status: 500 });
+    return widgetErrorResponse(error, "widget.message", "unknown_session");
   }
 }
