@@ -76,13 +76,96 @@ function pagingOf(params: { q?: string; page?: string }) {
   };
 }
 
+type Connections = Awaited<ReturnType<typeof listWahaConnections>>;
+
+function ContactActions({
+  contact,
+  connections,
+}: {
+  contact: ContactListRow;
+  connections: Connections;
+}) {
+  return (
+    <>
+      <EditContactButton
+        contact={{
+          id: contact.id,
+          displayName: contact.displayName,
+          channelUserId: contact.channelUserId,
+          metadata: pickProfileMetadata(contact.metadata),
+        }}
+      />
+      {isWhatsAppChatId(contact.channelUserId) && (
+        <StartConversationButton
+          connections={connections}
+          contact={{ id: contact.id, label: contact.displayName ?? contact.channelUserId }}
+        />
+      )}
+    </>
+  );
+}
+
+async function ContactItem({
+  contact,
+  connections,
+  canWrite,
+}: {
+  contact: ContactListRow;
+  connections: Connections;
+  canWrite: boolean;
+}) {
+  const t = await getTranslations("contacts");
+  const format = await getFormatter();
+  const email = contactEmail(contact.metadata);
+  return (
+    <li className="flex items-center justify-between gap-4 py-3">
+      <div className="min-w-0 space-y-0.5">
+        <div className="flex items-center gap-3">
+          <span className="truncate font-medium">
+            {contact.displayName ?? contact.channelUserId}
+          </span>
+          <span className="text-ink-muted shrink-0 text-xs">
+            {t("tickets", { count: contact.conversationCount })}
+          </span>
+        </div>
+        <p className="text-ink-muted truncate text-xs">
+          {contact.channelUserId}
+          {email && ` · ${email}`}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        <time className="text-ink-muted text-xs">
+          {format.dateTime(contact.createdAt, { dateStyle: "short" })}
+        </time>
+        {canWrite && <ContactActions contact={contact} connections={connections} />}
+      </div>
+    </li>
+  );
+}
+
+async function ContactSearch({ query }: { query: string | undefined }) {
+  const t = await getTranslations("contacts");
+  return (
+    <form className="flex gap-2" role="search">
+      <Input
+        type="search"
+        name="q"
+        defaultValue={query}
+        icon="search"
+        placeholder={t("searchPlaceholder")}
+        aria-label={t("search")}
+        className="flex-1"
+      />
+    </form>
+  );
+}
+
 export default async function ContactsPage({
   searchParams,
 }: {
   searchParams: Promise<{ q?: string; page?: string }>;
 }) {
   const t = await getTranslations("contacts");
-  const format = await getFormatter();
   const ctx = await requireTenantContext();
   const { query, page } = pagingOf(await searchParams);
   const canWrite = hasPermission(ctx.role, { messaging: ["write"] });
@@ -101,17 +184,7 @@ export default async function ContactsPage({
         right={canWrite ? <ContactsHeaderActions connections={connections} /> : undefined}
       />
 
-      <form className="flex gap-2" role="search">
-        <Input
-          type="search"
-          name="q"
-          defaultValue={query}
-          icon="search"
-          placeholder={t("searchPlaceholder")}
-          aria-label={t("search")}
-          className="flex-1"
-        />
-      </form>
+      <ContactSearch query={query} />
 
       {contacts.length === 0 ? (
         <EmptyState icon="users" title={query ? t("emptySearch", { query }) : t("empty")} />
@@ -119,46 +192,12 @@ export default async function ContactsPage({
         <Card title={t("title")}>
           <ul className="divide-y" data-testid="contact-list">
             {contacts.map((contact) => (
-              <li key={contact.id} className="flex items-center justify-between gap-4 py-3">
-                <div className="min-w-0 space-y-0.5">
-                  <div className="flex items-center gap-3">
-                    <span className="truncate font-medium">
-                      {contact.displayName ?? contact.channelUserId}
-                    </span>
-                    <span className="text-ink-muted shrink-0 text-xs">
-                      {t("tickets", { count: contact.conversationCount })}
-                    </span>
-                  </div>
-                  <p className="text-ink-muted truncate text-xs">
-                    {contact.channelUserId}
-                    {contactEmail(contact.metadata) && ` · ${contactEmail(contact.metadata)}`}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  <time className="text-ink-muted text-xs">
-                    {format.dateTime(contact.createdAt, { dateStyle: "short" })}
-                  </time>
-                  {canWrite && (
-                    <EditContactButton
-                      contact={{
-                        id: contact.id,
-                        displayName: contact.displayName,
-                        channelUserId: contact.channelUserId,
-                        metadata: pickProfileMetadata(contact.metadata),
-                      }}
-                    />
-                  )}
-                  {canWrite && isWhatsAppChatId(contact.channelUserId) && (
-                    <StartConversationButton
-                      connections={connections}
-                      contact={{
-                        id: contact.id,
-                        label: contact.displayName ?? contact.channelUserId,
-                      }}
-                    />
-                  )}
-                </div>
-              </li>
+              <ContactItem
+                key={contact.id}
+                contact={contact}
+                connections={connections}
+                canWrite={canWrite}
+              />
             ))}
           </ul>
           <PaginationNav page={page} hasNextPage={hasNextPage} query={query} t={t} />

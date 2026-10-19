@@ -55,6 +55,55 @@ function useProfileDraft(contact: EditableContact) {
   return { baseline, form, setForm, reload };
 }
 
+function ProfileFields({
+  form,
+  setForm,
+}: {
+  form: FormState;
+  setForm: (patch: Partial<FormState>) => void;
+}) {
+  const t = useTranslations("contacts.edit");
+  const field = (key: keyof FormState, label: string, props: { maxLength: number }) => (
+    <div className="space-y-1.5">
+      <Label htmlFor={`edit-${key}`}>{label}</Label>
+      <Input
+        shape="rounded"
+        id={`edit-${key}`}
+        value={form[key]}
+        onChange={(e) => setForm({ [key]: e.target.value })}
+        {...props}
+      />
+    </div>
+  );
+
+  const area = (key: keyof FormState, label: string, hint?: string) => (
+    <div className="space-y-1.5">
+      <Label htmlFor={`edit-${key}`}>{label}</Label>
+      <Textarea
+        id={`edit-${key}`}
+        rows={3}
+        value={form[key]}
+        onChange={(e) => setForm({ [key]: e.target.value })}
+      />
+      {hint && <p className="text-ink-muted text-xs">{hint}</p>}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {field("displayName", t("name"), { maxLength: 120 })}
+      {field("email", t("email"), { maxLength: 200 })}
+      {field("phone", t("phone"), { maxLength: 32 })}
+      {field("company", t("company"), { maxLength: 120 })}
+      {field("jobTitle", t("jobTitle"), { maxLength: 120 })}
+      {field("birthday", t("birthday"), { maxLength: 10 })}
+      {area("address", t("address"))}
+      {area("urls", t("urls"), t("urlsHint"))}
+      {area("notes", t("notes"))}
+    </div>
+  );
+}
+
 /** Row action for /app/contacts: edits the profile; saves only what changed, empty clears. */
 export function EditContactButton({ contact }: { contact: EditableContact }) {
   const t = useTranslations("contacts.edit");
@@ -86,32 +135,6 @@ export function EditContactButton({ contact }: { contact: EditableContact }) {
     });
   }
 
-  const field = (key: keyof FormState, label: string, props: { maxLength: number }) => (
-    <div className="space-y-1.5">
-      <Label htmlFor={`edit-${key}`}>{label}</Label>
-      <Input
-        shape="rounded"
-        id={`edit-${key}`}
-        value={form[key]}
-        onChange={(e) => setForm({ [key]: e.target.value })}
-        {...props}
-      />
-    </div>
-  );
-
-  const area = (key: keyof FormState, label: string, hint?: string) => (
-    <div className="space-y-1.5">
-      <Label htmlFor={`edit-${key}`}>{label}</Label>
-      <Textarea
-        id={`edit-${key}`}
-        rows={3}
-        value={form[key]}
-        onChange={(e) => setForm({ [key]: e.target.value })}
-      />
-      {hint && <p className="text-ink-muted text-xs">{hint}</p>}
-    </div>
-  );
-
   return (
     <>
       <Button variant="ghost" size="sm" onClick={openDialog}>
@@ -127,17 +150,7 @@ export function EditContactButton({ contact }: { contact: EditableContact }) {
           </Button>
         }
       >
-        <div className="space-y-4">
-          {field("displayName", t("name"), { maxLength: 120 })}
-          {field("email", t("email"), { maxLength: 200 })}
-          {field("phone", t("phone"), { maxLength: 32 })}
-          {field("company", t("company"), { maxLength: 120 })}
-          {field("jobTitle", t("jobTitle"), { maxLength: 120 })}
-          {field("birthday", t("birthday"), { maxLength: 10 })}
-          {area("address", t("address"))}
-          {area("urls", t("urls"), t("urlsHint"))}
-          {area("notes", t("notes"))}
-        </div>
+        <ProfileFields form={form} setForm={setForm} />
       </Dialog>
     </>
   );

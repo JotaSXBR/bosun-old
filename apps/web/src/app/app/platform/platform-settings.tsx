@@ -22,81 +22,89 @@ type FieldDef = {
 
 type T = ReturnType<typeof useTranslations>;
 
-const groupDefs = (
-  t: T,
-): Record<PlatformSettingGroup, { title: string; description: string; fields: FieldDef[] }> => ({
-  email: {
-    title: t("platform.groups.email.title"),
-    description: t("platform.groups.email.description"),
-    fields: [
-      {
-        path: "provider",
-        label: t("platform.fields.provider"),
-        kind: "select",
-        options: [
-          { value: "console", label: t("platform.fields.consoleOption") },
-          { value: "resend", label: "resend" },
-          { value: "smtp", label: "smtp" },
-        ],
-      },
-      {
-        path: "from",
-        label: t("platform.fields.from"),
-        placeholder: "Bosun <noreply@exemplo.com>",
-      },
-      { path: "resendApiKey", label: t("platform.fields.resendApiKey"), secret: true },
-      { path: "smtp.host", label: t("platform.fields.smtpHost") },
-      {
-        path: "smtp.port",
-        label: t("platform.fields.smtpPort"),
-        kind: "number",
-        placeholder: "587",
-      },
-      { path: "smtp.user", label: t("platform.fields.smtpUser") },
-      { path: "smtp.password", label: t("platform.fields.smtpPassword"), secret: true },
-      { path: "smtp.secure", label: t("platform.fields.smtpSecure"), kind: "checkbox" },
-    ],
-  },
-  billing: {
-    title: t("platform.groups.billing.title"),
-    description: t("platform.groups.billing.description"),
-    fields: [
-      { path: "asaasApiKey", label: t("platform.fields.asaasApiKey"), secret: true },
-      {
-        path: "asaasEnvironment",
-        label: t("platform.fields.environment"),
-        kind: "select",
-        options: [
-          { value: "sandbox", label: "sandbox" },
-          { value: "production", label: "production" },
-        ],
-      },
-      { path: "asaasWebhookToken", label: t("platform.fields.asaasWebhookToken"), secret: true },
-    ],
-  },
-  meta: {
-    title: t("platform.groups.meta.title"),
-    description: t("platform.groups.meta.description"),
-    fields: [
-      { path: "phoneNumberId", label: t("platform.fields.phoneNumberId") },
-      {
-        path: "graphApiVersion",
-        label: t("platform.fields.graphApiVersion"),
-        placeholder: "v26.0",
-      },
-      { path: "appSecret", label: t("platform.fields.appSecret"), secret: true },
-      { path: "verifyToken", label: t("platform.fields.verifyToken"), secret: true },
-      { path: "accessToken", label: t("platform.fields.accessToken"), secret: true },
-    ],
-  },
-  ai: {
-    title: t("platform.groups.ai.title"),
-    description: t("platform.groups.ai.description"),
-    fields: [
-      { path: "openaiApiKey", label: t("platform.fields.openaiApiKey"), secret: true },
-      { path: "anthropicApiKey", label: t("platform.fields.anthropicApiKey"), secret: true },
-    ],
-  },
+type GroupDef = { title: string; description: string; fields: FieldDef[] };
+
+const emailGroup = (t: T): GroupDef => ({
+  title: t("platform.groups.email.title"),
+  description: t("platform.groups.email.description"),
+  fields: [
+    {
+      path: "provider",
+      label: t("platform.fields.provider"),
+      kind: "select",
+      options: [
+        { value: "console", label: t("platform.fields.consoleOption") },
+        { value: "resend", label: "resend" },
+        { value: "smtp", label: "smtp" },
+      ],
+    },
+    {
+      path: "from",
+      label: t("platform.fields.from"),
+      placeholder: "Bosun <noreply@exemplo.com>",
+    },
+    { path: "resendApiKey", label: t("platform.fields.resendApiKey"), secret: true },
+    { path: "smtp.host", label: t("platform.fields.smtpHost") },
+    {
+      path: "smtp.port",
+      label: t("platform.fields.smtpPort"),
+      kind: "number",
+      placeholder: "587",
+    },
+    { path: "smtp.user", label: t("platform.fields.smtpUser") },
+    { path: "smtp.password", label: t("platform.fields.smtpPassword"), secret: true },
+    { path: "smtp.secure", label: t("platform.fields.smtpSecure"), kind: "checkbox" },
+  ],
+});
+
+const billingGroup = (t: T): GroupDef => ({
+  title: t("platform.groups.billing.title"),
+  description: t("platform.groups.billing.description"),
+  fields: [
+    { path: "asaasApiKey", label: t("platform.fields.asaasApiKey"), secret: true },
+    {
+      path: "asaasEnvironment",
+      label: t("platform.fields.environment"),
+      kind: "select",
+      options: [
+        { value: "sandbox", label: "sandbox" },
+        { value: "production", label: "production" },
+      ],
+    },
+    { path: "asaasWebhookToken", label: t("platform.fields.asaasWebhookToken"), secret: true },
+  ],
+});
+
+const metaGroup = (t: T): GroupDef => ({
+  title: t("platform.groups.meta.title"),
+  description: t("platform.groups.meta.description"),
+  fields: [
+    { path: "phoneNumberId", label: t("platform.fields.phoneNumberId") },
+    {
+      path: "graphApiVersion",
+      label: t("platform.fields.graphApiVersion"),
+      placeholder: "v26.0",
+    },
+    { path: "appSecret", label: t("platform.fields.appSecret"), secret: true },
+    { path: "verifyToken", label: t("platform.fields.verifyToken"), secret: true },
+    { path: "accessToken", label: t("platform.fields.accessToken"), secret: true },
+  ],
+});
+
+const aiGroup = (t: T): GroupDef => ({
+  title: t("platform.groups.ai.title"),
+  description: t("platform.groups.ai.description"),
+  fields: [
+    { path: "openaiApiKey", label: t("platform.fields.openaiApiKey"), secret: true },
+    { path: "anthropicApiKey", label: t("platform.fields.anthropicApiKey"), secret: true },
+  ],
+});
+
+const groupDefs = (t: T): Record<PlatformSettingGroup, GroupDef> => ({
+  email: emailGroup(t),
+  billing: billingGroup(t),
+  meta: metaGroup(t),
+  ai: aiGroup(t),
 });
 
 function fdString(fd: FormData, key: string): string {
@@ -143,6 +151,44 @@ function SelectInput({ id, field, current }: { id: string; field: FieldDef; curr
   );
 }
 
+function FieldControl({
+  id,
+  field,
+  current,
+  placeholder,
+}: {
+  id: string;
+  field: FieldDef;
+  current: unknown;
+  placeholder: string | undefined;
+}) {
+  if (field.kind === "select") return <SelectInput id={id} field={field} current={current} />;
+  if (field.kind === "checkbox") {
+    return (
+      <input
+        id={id}
+        name={field.path}
+        type="checkbox"
+        defaultChecked={current === true}
+        className="border-line mt-2 h-4 w-4 rounded-xs border"
+      />
+    );
+  }
+  const shownValue =
+    typeof current === "string" || typeof current === "number" ? String(current) : "";
+  return (
+    <Input
+      shape="rounded"
+      id={id}
+      name={field.path}
+      type={field.secret ? "password" : field.kind === "number" ? "number" : "text"}
+      autoComplete={field.secret ? "new-password" : "off"}
+      defaultValue={field.secret ? "" : shownValue}
+      placeholder={placeholder}
+    />
+  );
+}
+
 function FieldInput({
   group,
   field,
@@ -157,35 +203,6 @@ function FieldInput({
   const current = getPath(summary.values, field.path);
   const isSecretSet = field.secret === true && summary.secretsSet[field.path] === true;
   const id = `${group}-${field.path}`;
-  const shownValue =
-    typeof current === "string" || typeof current === "number" ? String(current) : "";
-
-  let control;
-  if (field.kind === "select") {
-    control = <SelectInput id={id} field={field} current={current} />;
-  } else if (field.kind === "checkbox") {
-    control = (
-      <input
-        id={id}
-        name={field.path}
-        type="checkbox"
-        defaultChecked={current === true}
-        className="border-line mt-2 h-4 w-4 rounded-xs border"
-      />
-    );
-  } else {
-    control = (
-      <Input
-        shape="rounded"
-        id={id}
-        name={field.path}
-        type={field.secret ? "password" : field.kind === "number" ? "number" : "text"}
-        autoComplete={field.secret ? "new-password" : "off"}
-        defaultValue={field.secret ? "" : shownValue}
-        placeholder={isSecretSet ? t("platform.secretSet") : field.placeholder}
-      />
-    );
-  }
 
   return (
     <div className="space-y-1">
@@ -195,7 +212,12 @@ function FieldInput({
           <span className="text-ink-muted ml-1 text-xs">{t("platform.fromDb")}</span>
         )}
       </label>
-      {control}
+      <FieldControl
+        id={id}
+        field={field}
+        current={current}
+        placeholder={isSecretSet ? t("platform.secretSet") : field.placeholder}
+      />
     </div>
   );
 }
@@ -214,6 +236,20 @@ function collectValues(fields: FieldDef[], fd: FormData): Record<string, unknown
     }
   }
   return values;
+}
+
+function GroupTitle({ title, configured }: { title: string; configured: boolean }) {
+  const t = useTranslations("settings");
+  return (
+    <span className="flex items-center gap-2">
+      {title}
+      {configured ? (
+        <span className="text-success text-xs font-normal">{t("platform.configured")}</span>
+      ) : (
+        <span className="text-ink-muted text-xs font-normal">{t("platform.notConfigured")}</span>
+      )}
+    </span>
+  );
 }
 
 /** One platform settings group — rendered at /app/platform/<group> (platform_admin only). */
@@ -237,18 +273,7 @@ export function PlatformGroupCard({ summary }: { summary: PlatformSettingSummary
 
   return (
     <Card
-      title={
-        <span className="flex items-center gap-2">
-          {def.title}
-          {summary.configured ? (
-            <span className="text-success text-xs font-normal">{t("platform.configured")}</span>
-          ) : (
-            <span className="text-ink-muted text-xs font-normal">
-              {t("platform.notConfigured")}
-            </span>
-          )}
-        </span>
-      }
+      title={<GroupTitle title={def.title} configured={summary.configured} />}
       subtitle={def.description}
     >
       <form onSubmit={onSubmit} className="grid gap-4 sm:grid-cols-2">

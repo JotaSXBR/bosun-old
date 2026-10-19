@@ -50,15 +50,13 @@ function ColorField({
   );
 }
 
-export function NewFunnelDialog({
-  open,
-  onOpenChange,
-  redirectBase = "/app/deals",
-}: {
+type NewFunnelProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   redirectBase?: string;
-}) {
+};
+
+function useCreateFunnel({ onOpenChange, redirectBase = "/app/deals" }: NewFunnelProps) {
   const t = useTranslations("leads");
   const router = useRouter();
   const [name, setName] = useState("");
@@ -80,72 +78,85 @@ export function NewFunnelDialog({
       }
     });
   }
+  return { name, setName, templateRef, setTemplateRef, pending, submit };
+}
+
+type FunnelForm = ReturnType<typeof useCreateFunnel>;
+
+function FunnelFields({ form }: { form: FunnelForm }) {
+  const t = useTranslations("leads");
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <Label htmlFor="funnel-name">{t("funnelForm.name")}</Label>
+        <Input
+          shape="rounded"
+          id="funnel-name"
+          value={form.name}
+          onChange={(e) => form.setName(e.target.value)}
+          placeholder={t("funnelForm.namePlaceholder")}
+          maxLength={100}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="funnel-template">{t("funnelForm.template")}</Label>
+        <Select
+          options={FUNNEL_TEMPLATES.map((tpl) => ({
+            value: tpl.ref,
+            label: `${tpl.label} — ${t("funnelForm.templateStages", { count: tpl.stages.length })}`,
+          }))}
+          value={form.templateRef || undefined}
+          onChange={form.setTemplateRef}
+          placeholder={t("funnelForm.templateEmpty")}
+          id="funnel-template"
+        />
+      </div>
+    </div>
+  );
+}
+
+export function NewFunnelDialog(props: NewFunnelProps) {
+  const t = useTranslations("leads");
+  const form = useCreateFunnel(props);
 
   return (
     <Dialog
-      open={open}
-      onClose={() => onOpenChange(false)}
+      open={props.open}
+      onClose={() => props.onOpenChange(false)}
       title={t("funnelForm.newTitle")}
       description={t("funnelForm.newDescription")}
       footer={
-        <Button variant="primary" onClick={submit} disabled={!name.trim() || pending}>
+        <Button
+          variant="primary"
+          onClick={form.submit}
+          disabled={!form.name.trim() || form.pending}
+        >
           {t("createFunnel")}
         </Button>
       }
     >
-      <div className="space-y-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="funnel-name">{t("funnelForm.name")}</Label>
-          <Input
-            shape="rounded"
-            id="funnel-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={t("funnelForm.namePlaceholder")}
-            maxLength={100}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="funnel-template">{t("funnelForm.template")}</Label>
-          <Select
-            options={FUNNEL_TEMPLATES.map((tpl) => ({
-              value: tpl.ref,
-              label: `${tpl.label} — ${t("funnelForm.templateStages", { count: tpl.stages.length })}`,
-            }))}
-            value={templateRef || undefined}
-            onChange={setTemplateRef}
-            placeholder={t("funnelForm.templateEmpty")}
-            id="funnel-template"
-          />
-        </div>
-      </div>
+      <FunnelFields form={form} />
     </Dialog>
   );
 }
 
-export function StageDialog({
-  funnelId,
-  stage,
-  open,
-  onOpenChange,
-}: {
+type StageDialogProps = {
   funnelId: string;
   stage?: StageRow;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}) {
-  const t = useTranslations("leads");
-  const tc = useTranslations("common");
+};
+
+function useStageForm({ funnelId, stage, onOpenChange }: StageDialogProps) {
   const router = useRouter();
   const [name, setName] = useState(stage?.name ?? "");
   const [color, setColor] = useState<PaletteColor>((stage?.color ?? "gray") as PaletteColor);
   const [pending, startTransition] = useTransition();
-  const editing = Boolean(stage);
 
   function submit() {
     startTransition(async () => {
-      const result = editing
-        ? await updateStageAction({ stageId: stage!.id, name, color })
+      const result = stage
+        ? await updateStageAction({ stageId: stage.id, name, color })
         : await createStageAction({ funnelId, name, color });
       if (result.ok) {
         onOpenChange(false);
@@ -155,11 +166,19 @@ export function StageDialog({
       }
     });
   }
+  return { name, setName, color, setColor, pending, submit };
+}
+
+export function StageDialog(props: StageDialogProps) {
+  const t = useTranslations("leads");
+  const tc = useTranslations("common");
+  const { name, setName, color, setColor, pending, submit } = useStageForm(props);
+  const editing = Boolean(props.stage);
 
   return (
     <Dialog
-      open={open}
-      onClose={() => onOpenChange(false)}
+      open={props.open}
+      onClose={() => props.onOpenChange(false)}
       title={editing ? t("funnelForm.stageEditTitle") : t("funnelForm.stageNewTitle")}
       footer={
         <Button variant="primary" onClick={submit} disabled={!name.trim() || pending}>

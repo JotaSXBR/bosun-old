@@ -112,6 +112,31 @@ function RowMetaLine({
   );
 }
 
+function RowTitleLine({ row, awaitingLabel }: { row: QueueRowView; awaitingLabel: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <Avatar src={row.avatarUrl ?? undefined} name={row.title} size="sm" />
+      <span className="flex min-w-0 items-center gap-2">
+        {row.awaitingReply && (
+          <span className="bg-signal h-2 w-2 shrink-0 rounded-full" title={awaitingLabel} />
+        )}
+        <span className={cn("truncate", row.unreadCount > 0 ? "font-semibold" : "font-medium")}>
+          {row.title}
+        </span>
+        <span className="text-ink-muted shrink-0 text-xs">#{row.ticketNumber}</span>
+      </span>
+      <span className="flex shrink-0 items-center gap-1.5">
+        {row.unreadCount > 0 && (
+          <Badge variant="solid" tone="accent" size="sm" data-testid="unread-count">
+            {row.unreadCount > 99 ? "99+" : row.unreadCount}
+          </Badge>
+        )}
+        <span className="text-ink-muted text-xs">{row.timeLabel}</span>
+      </span>
+    </div>
+  );
+}
+
 function QueueRowItem({
   row,
   href,
@@ -139,47 +164,23 @@ function QueueRowItem({
         cursor && "shadow-focus",
       )}
     >
-      <div className="flex items-center justify-between gap-3">
-        <Avatar src={row.avatarUrl ?? undefined} name={row.title} size="sm" />
-        <span className="flex min-w-0 items-center gap-2">
-          {row.awaitingReply && (
-            <span className="bg-signal h-2 w-2 shrink-0 rounded-full" title={awaitingLabel} />
-          )}
-          <span className={cn("truncate", row.unreadCount > 0 ? "font-semibold" : "font-medium")}>
-            {row.title}
-          </span>
-          <span className="text-ink-muted shrink-0 text-xs">#{row.ticketNumber}</span>
-        </span>
-        <span className="flex shrink-0 items-center gap-1.5">
-          {row.unreadCount > 0 && (
-            <Badge variant="solid" tone="accent" size="sm" data-testid="unread-count">
-              {row.unreadCount > 99 ? "99+" : row.unreadCount}
-            </Badge>
-          )}
-          <span className="text-ink-muted text-xs">{row.timeLabel}</span>
-        </span>
-      </div>
+      <RowTitleLine row={row} awaitingLabel={awaitingLabel} />
       <RowPreviewLine row={row} />
       <RowMetaLine row={row} showAssignee={showAssignee} showChannel={showChannel} />
     </Link>
   );
 }
 
-export function InboxQueueList({
+/** j/k move the cursor, Enter opens the row under it (ignored while typing in a field). */
+function useQueueCursor({
   rows,
   selectedId,
   query,
-  showAssignee,
-  showChannel,
 }: {
   rows: QueueRowView[];
   selectedId: string | undefined;
-  /** Query string preserving the active filters — selection joins as `c`. */
   query: string;
-  showAssignee: boolean;
-  showChannel: boolean;
 }) {
-  const t = useTranslations("inbox");
   const router = useRouter();
   const [cursor, setCursor] = useState(() =>
     Math.max(
@@ -208,6 +209,25 @@ export function InboxQueueList({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [ids, query, router]);
+  return cursor;
+}
+
+export function InboxQueueList({
+  rows,
+  selectedId,
+  query,
+  showAssignee,
+  showChannel,
+}: {
+  rows: QueueRowView[];
+  selectedId: string | undefined;
+  /** Query string preserving the active filters — selection joins as `c`. */
+  query: string;
+  showAssignee: boolean;
+  showChannel: boolean;
+}) {
+  const t = useTranslations("inbox");
+  const cursor = useQueueCursor({ rows, selectedId, query });
 
   return (
     <ul className="divide-line divide-y" data-testid="conversation-list">

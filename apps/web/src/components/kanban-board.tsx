@@ -72,29 +72,19 @@ function useBoardColumns(board: BoardData) {
   return [columns, setColumns] as const;
 }
 
-export function KanbanBoard({
-  board,
-  funnels,
-  labels,
-  canWrite,
-  canManage,
-}: {
-  board: BoardData;
-  funnels: FunnelRow[];
-  labels: LabelRow[];
-  canWrite: boolean;
-  canManage: boolean;
-}) {
-  const [columns, setColumns] = useBoardColumns(board);
-  const [activeDeal, setActiveDeal] = useState<DealCardRow | null>(null);
-  const [dialogs, setDialogs] = useState<KanbanDialogState>(DIALOGS_CLOSED);
-  const patchDialogs = (patch: Partial<KanbanDialogState>) =>
-    setDialogs((prev) => ({ ...prev, ...patch }));
+type SetColumns = (columns: ColumnState[]) => void;
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor),
-  );
+/** Drag state and the shared move path — drag drop and the card's "Mover para" menu. */
+function useKanbanDrag({
+  columns,
+  setColumns,
+  canWrite,
+}: {
+  columns: ColumnState[];
+  setColumns: SetColumns;
+  canWrite: boolean;
+}) {
+  const [activeDeal, setActiveDeal] = useState<DealCardRow | null>(null);
 
   function onDragStart(event: DragStartEvent) {
     const id = String(event.active.id);
@@ -108,7 +98,6 @@ export function KanbanBoard({
     moveDeal(String(active.id), String(over.id));
   }
 
-  /** Shared move path — drag drop and the card's "Mover para" menu. */
   function moveDeal(dealId: string, overId: string) {
     const targetCol = findTargetColumn(columns, overId);
     if (!targetCol) return;
@@ -126,6 +115,87 @@ export function KanbanBoard({
       }
     });
   }
+  return { activeDeal, onDragStart, onDragEnd, moveDeal };
+}
+
+function KanbanColumns({
+  columns,
+  canWrite,
+  canManage,
+  patchDialogs,
+  moveDeal,
+}: {
+  columns: ColumnState[];
+  canWrite: boolean;
+  canManage: boolean;
+  patchDialogs: (patch: Partial<KanbanDialogState>) => void;
+  moveDeal: (dealId: string, overId: string) => void;
+}) {
+  return (
+    <div className="flex items-start gap-3 overflow-x-auto pb-4" data-testid="kanban-board">
+      {columns.map((column) => (
+        <KanbanStageColumn
+          key={column.stage.id}
+          stage={column.stage}
+          stages={columns.map((c) => c.stage)}
+          deals={column.deals}
+          canWrite={canWrite}
+          canManage={canManage}
+          cardCallbacks={{
+            onEdit: (deal) => patchDialogs({ editingDeal: deal }),
+            onLabels: (deal) => patchDialogs({ labelsDeal: deal }),
+            onDelete: (deal) => patchDialogs({ deletingDeal: deal }),
+            onMove: (deal, stageId) => moveDeal(deal.id, stageId),
+          }}
+          onAddDeal={() => patchDialogs({ newDealStage: column.stage.id })}
+        />
+      ))}
+    </div>
+  );
+}
+
+const useKanbanSensors = () =>
+  useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor),
+  );
+
+/** Read-only card that follows the pointer while dragging. */
+function DragPreview({ deal, stages }: { deal: DealCardRow; stages: StageRow[] }) {
+  return (
+    <DealCardView
+      deal={deal}
+      stages={stages}
+      canWrite={false}
+      canManage={false}
+      onEdit={() => undefined}
+      onLabels={() => undefined}
+      onDelete={() => undefined}
+      onMove={() => undefined}
+    />
+  );
+}
+
+type KanbanBoardProps = {
+  board: BoardData;
+  funnels: FunnelRow[];
+  labels: LabelRow[];
+  canWrite: boolean;
+  canManage: boolean;
+};
+
+export function KanbanBoard({ board, funnels, labels, canWrite, canManage }: KanbanBoardProps) {
+  const [columns, setColumns] = useBoardColumns(board);
+  const [dialogs, setDialogs] = useState<KanbanDialogState>(DIALOGS_CLOSED);
+  const patchDialogs = (patch: Partial<KanbanDialogState>) =>
+    setDialogs((prev) => ({ ...prev, ...patch }));
+  const { activeDeal, onDragStart, onDragEnd, moveDeal } = useKanbanDrag({
+    columns,
+    setColumns,
+    canWrite,
+  });
+  const stages = columns.map((c) => c.stage);
+  const sensors = useKanbanSensors();
 
   return (
     <div className="space-y-4">
@@ -137,46 +207,21 @@ export function KanbanBoard({
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
       >
-        <div className="flex items-start gap-3 overflow-x-auto pb-4" data-testid="kanban-board">
-          {columns.map((column) => (
-            <KanbanStageColumn
-              key={column.stage.id}
-              stage={column.stage}
-              stages={columns.map((c) => c.stage)}
-              deals={column.deals}
-              canWrite={canWrite}
-              canManage={canManage}
-              cardCallbacks={{
-                onEdit: (deal) => patchDialogs({ editingDeal: deal }),
-                onLabels: (deal) => patchDialogs({ labelsDeal: deal }),
-                onDelete: (deal) => patchDialogs({ deletingDeal: deal }),
-                onMove: (deal, stageId) => moveDeal(deal.id, stageId),
-              }}
-              onAddDeal={() => patchDialogs({ newDealStage: column.stage.id })}
-            />
-          ))}
-        </div>
-        <DragOverlay>
-          {activeDeal ? (
-            <DealCardView
-              deal={activeDeal}
-              stages={columns.map((c) => c.stage)}
-              canWrite={false}
-              canManage={false}
-              onEdit={() => undefined}
-              onLabels={() => undefined}
-              onDelete={() => undefined}
-              onMove={() => undefined}
-            />
-          ) : null}
-        </DragOverlay>
+        <KanbanColumns
+          columns={columns}
+          canWrite={canWrite}
+          canManage={canManage}
+          patchDialogs={patchDialogs}
+          moveDeal={moveDeal}
+        />
+        <DragOverlay>{activeDeal && <DragPreview deal={activeDeal} stages={stages} />}</DragOverlay>
       </DndContext>
 
       <KanbanDialogs
         state={dialogs}
         setState={patchDialogs}
         funnelId={board.funnel.id}
-        stages={columns.map((c) => c.stage)}
+        stages={stages}
         labels={labels}
         canManage={canManage}
       />

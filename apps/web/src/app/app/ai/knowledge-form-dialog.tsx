@@ -8,19 +8,9 @@ import { Select } from "@crm/design-system/components/select";
 import { Textarea } from "@crm/design-system/components/textarea";
 import { useTranslations } from "next-intl";
 
-export function KnowledgeFormDialog({
-  open,
-  onOpenChange,
-  editing,
-  title,
-  setTitle,
-  content,
-  setContent,
-  status,
-  setStatus,
-  pending,
-  onSubmit,
-}: {
+type Status = "active" | "archived";
+
+type DialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editing: boolean;
@@ -28,13 +18,70 @@ export function KnowledgeFormDialog({
   setTitle: (v: string) => void;
   content: string;
   setContent: (v: string) => void;
-  status: "active" | "archived";
-  setStatus: (v: "active" | "archived") => void;
+  status: Status;
+  setStatus: (v: Status) => void;
   pending: boolean;
   onSubmit: () => void;
-}) {
+};
+
+type FieldsProps = Pick<
+  DialogProps,
+  "title" | "setTitle" | "content" | "setContent" | "status" | "setStatus" | "pending"
+>;
+
+function KnowledgeFields(props: FieldsProps) {
+  const { title, setTitle, content, setContent, status, setStatus, pending } = props;
+  const t = useTranslations("settings.ai.knowledge");
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <Label htmlFor="kb-title">{t("titleField")}</Label>
+        <Input
+          shape="rounded"
+          id="kb-title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={200}
+          disabled={pending}
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="kb-content">{t("content")}</Label>
+        <Textarea
+          id="kb-content"
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          rows={5}
+          maxLength={20000}
+          disabled={pending}
+        />
+      </div>
+      <div className="space-y-1">
+        <Label>{t("status")}</Label>
+        <Select
+          options={[
+            { value: "active", label: t("statusActive") },
+            { value: "archived", label: t("statusArchived") },
+          ]}
+          value={status}
+          onChange={(v) => setStatus(v as Status)}
+          disabled={pending}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function KnowledgeFormDialog({
+  open,
+  onOpenChange,
+  editing,
+  onSubmit,
+  ...fields
+}: DialogProps) {
   const t = useTranslations("settings.ai.knowledge");
   const tc = useTranslations("common");
+  const { title, content, pending } = fields;
 
   return (
     <Dialog
@@ -57,42 +104,7 @@ export function KnowledgeFormDialog({
         </>
       }
     >
-      <div className="space-y-3">
-        <div className="space-y-1">
-          <Label htmlFor="kb-title">{t("titleField")}</Label>
-          <Input
-            shape="rounded"
-            id="kb-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            maxLength={200}
-            disabled={pending}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="kb-content">{t("content")}</Label>
-          <Textarea
-            id="kb-content"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={5}
-            maxLength={20000}
-            disabled={pending}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label>{t("status")}</Label>
-          <Select
-            options={[
-              { value: "active", label: t("statusActive") },
-              { value: "archived", label: t("statusArchived") },
-            ]}
-            value={status}
-            onChange={(v) => setStatus(v as "active" | "archived")}
-            disabled={pending}
-          />
-        </div>
-      </div>
+      <KnowledgeFields {...fields} />
     </Dialog>
   );
 }

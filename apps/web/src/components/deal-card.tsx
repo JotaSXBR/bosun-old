@@ -19,6 +19,28 @@ import type { CSSProperties } from "react";
 
 import { formatValueCents, paletteStyle } from "@/components/palette";
 
+function MoveToSubmenu({
+  deal,
+  stages,
+  onMove,
+}: Pick<DealCardProps, "deal" | "stages" | "onMove">) {
+  const t = useTranslations("leads");
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>{t("moveTo")}</DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        {stages
+          .filter((s) => s.id !== deal.stageId)
+          .map((s) => (
+            <DropdownMenuItem key={s.id} onSelect={() => onMove(deal, s.id)}>
+              {s.name}
+            </DropdownMenuItem>
+          ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
+
 function DealCardMenu({
   deal,
   stages,
@@ -45,20 +67,7 @@ function DealCardMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {canWrite && <DropdownMenuItem onSelect={() => onEdit(deal)}>{t("edit")}</DropdownMenuItem>}
-        {canWrite && (
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>{t("moveTo")}</DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              {stages
-                .filter((s) => s.id !== deal.stageId)
-                .map((s) => (
-                  <DropdownMenuItem key={s.id} onSelect={() => onMove(deal, s.id)}>
-                    {s.name}
-                  </DropdownMenuItem>
-                ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        )}
+        {canWrite && <MoveToSubmenu deal={deal} stages={stages} onMove={onMove} />}
         {canWrite && (
           <DropdownMenuItem onSelect={() => onLabels(deal)}>{t("labels")}</DropdownMenuItem>
         )}
@@ -84,25 +93,40 @@ interface DealCardProps {
   onMove: (deal: DealCardRow, stageId: string) => void;
 }
 
-export function DealCardView({
-  deal,
-  stages,
-  canWrite,
-  canManage,
-  onEdit,
-  onLabels,
-  onDelete,
-  onMove,
-  dragHandleProps,
-  containerRef,
-  dragging,
-  style,
-}: DealCardProps & {
+type DealCardViewProps = DealCardProps & {
   dragHandleProps?: Record<string, unknown>;
   containerRef?: (el: HTMLElement | null) => void;
   dragging?: boolean;
   style?: CSSProperties;
-}) {
+};
+
+function DealLabelChips({ labels }: { labels: DealCardRow["labels"] }) {
+  if (labels.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1">
+      {labels.map((label) => (
+        <span
+          key={label.id}
+          className={cn(
+            "rounded-full px-1.5 py-0.5 text-xs font-medium",
+            paletteStyle(label.color).chip,
+          )}
+        >
+          {label.name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function DealCardView({
+  dragHandleProps,
+  containerRef,
+  dragging,
+  style,
+  ...card
+}: DealCardViewProps) {
+  const { deal, canWrite } = card;
   const t = useTranslations("leads");
   return (
     <div
@@ -127,16 +151,7 @@ export function DealCardView({
           <p className="truncate text-sm font-medium">{deal.title}</p>
           <p className="text-ink-muted truncate text-xs">{deal.contactName ?? deal.contactRef}</p>
         </button>
-        <DealCardMenu
-          deal={deal}
-          stages={stages}
-          canWrite={canWrite}
-          canManage={canManage}
-          onEdit={onEdit}
-          onLabels={onLabels}
-          onDelete={onDelete}
-          onMove={onMove}
-        />
+        <DealCardMenu {...card} />
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
         {deal.valueCents > 0 ? (
@@ -145,21 +160,7 @@ export function DealCardView({
           <span />
         )}
       </div>
-      {deal.labels.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {deal.labels.map((label) => (
-            <span
-              key={label.id}
-              className={cn(
-                "rounded-full px-1.5 py-0.5 text-xs font-medium",
-                paletteStyle(label.color).chip,
-              )}
-            >
-              {label.name}
-            </span>
-          ))}
-        </div>
-      )}
+      <DealLabelChips labels={deal.labels} />
     </div>
   );
 }

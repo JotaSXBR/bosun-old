@@ -19,9 +19,8 @@ import { z } from "zod";
 
 import { createOrganization } from "@/server/actions/organization";
 
-export default function OnboardingPage() {
+function OrgNameForm() {
   const t = useTranslations("onboarding");
-  const tl = useTranslations("auth.layout");
   const formSchema = z.object({
     name: z.string().trim().min(2, t("orgNameMin")).max(80),
   });
@@ -39,6 +38,39 @@ export default function OnboardingPage() {
   }
 
   return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <FormField
+          control={form.control}
+          name="name"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("orgName")}</FormLabel>
+              <FormControl>
+                <Input shape="rounded" size="lg" placeholder={t("orgNamePlaceholder")} {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <Button
+          variant="primary"
+          type="submit"
+          size="lg"
+          fullWidth
+          loading={form.formState.isSubmitting}
+        >
+          {t("submit")}
+        </Button>
+      </form>
+    </Form>
+  );
+}
+
+export default function OnboardingPage() {
+  const t = useTranslations("onboarding");
+  const tl = useTranslations("auth.layout");
+  return (
     <AuthLayout
       lead={tl("lead")}
       payoff={tl("payoff")}
@@ -48,37 +80,7 @@ export default function OnboardingPage() {
         <h1 className="font-display text-h2 text-ink-strong font-semibold">{t("title")}</h1>
         <p className="text-ink-muted text-md mt-2">{t("description")}</p>
       </div>
-      <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-          <FormField
-            control={form.control}
-            name="name"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{t("orgName")}</FormLabel>
-                <FormControl>
-                  <Input
-                    shape="rounded"
-                    size="lg"
-                    placeholder={t("orgNamePlaceholder")}
-                    {...field}
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <Button
-            variant="primary"
-            type="submit"
-            size="lg"
-            fullWidth
-            loading={form.formState.isSubmitting}
-          >
-            {t("submit")}
-          </Button>
-        </form>
-      </Form>
+      <OrgNameForm />
     </AuthLayout>
   );
 }

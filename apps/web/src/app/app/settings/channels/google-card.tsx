@@ -112,33 +112,43 @@ function SyncButton({
   );
 }
 
-export function GoogleCard({
-  connection,
-  sync,
-  canManage,
-  redirectUri,
-  flash,
-}: {
-  connection: GoogleConnectionView | null;
-  sync: GoogleSyncView | null;
-  canManage: boolean;
-  redirectUri: string;
-  flash: string | null;
-}) {
+function ConnectionStatus({ connection }: { connection: GoogleConnectionView }) {
+  const t = useTranslations("integrations.google");
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-3">
+        <Badge tone={TONES[connection.status] ?? "neutral"} data-testid="google-status">
+          {t.has(`status.${connection.status}`)
+            ? t(`status.${connection.status}`)
+            : connection.status}
+        </Badge>
+        {connection.accountEmail && (
+          <span className="text-ink-muted text-sm">{connection.accountEmail}</span>
+        )}
+        {connection.lastCheckedAt && (
+          <span className="text-ink-muted text-xs">
+            {t("lastChecked", { date: new Date(connection.lastCheckedAt).toLocaleString() })}
+          </span>
+        )}
+      </div>
+      {connection.lastError && (
+        <p className="text-danger text-sm">
+          {t.has(`errors.${connection.lastError}`)
+            ? t(`errors.${connection.lastError}`)
+            : connection.lastError}
+        </p>
+      )}
+    </>
+  );
+}
+
+function useGoogleActions() {
   const t = useTranslations("integrations.google");
   const [pending, startTransition] = useTransition();
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
 
-  useEffect(() => {
-    if (flash && flash in FLASH_TOASTS) {
-      toast[FLASH_TOASTS[flash as keyof typeof FLASH_TOASTS]](t(`flash.${flash}`));
-    }
-  }, [flash, t]);
-
-  function connect() {
+  function connect(credentials: { clientId: string; clientSecret: string }) {
     startTransition(async () => {
-      const result = await connectGoogleAction({ clientId, clientSecret });
+      const result = await connectGoogleAction(credentials);
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -165,35 +175,117 @@ export function GoogleCard({
     });
   }
 
+  return { pending, connect, verify, disconnect };
+}
+
+function CredentialFields(props: {
+  clientId: string;
+  clientSecret: string;
+  onClientId: (v: string) => void;
+  onClientSecret: (v: string) => void;
+}) {
+  const t = useTranslations("integrations.google");
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <div className="space-y-1">
+        <Label htmlFor="google-client-id">{t("clientId")}</Label>
+        <Input
+          id="google-client-id"
+          shape="rounded"
+          value={props.clientId}
+          onChange={(event) => props.onClientId(event.target.value)}
+          autoComplete="off"
+          required
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="google-client-secret">{t("clientSecret")}</Label>
+        <Input
+          id="google-client-secret"
+          shape="rounded"
+          type="password"
+          value={props.clientSecret}
+          onChange={(event) => props.onClientSecret(event.target.value)}
+          autoComplete="off"
+          required
+        />
+      </div>
+    </div>
+  );
+}
+
+function ConnectForm({
+  reconnect,
+  redirectUri,
+  pending,
+  onConnect,
+}: {
+  reconnect: boolean;
+  redirectUri: string;
+  pending: boolean;
+  onConnect: (credentials: { clientId: string; clientSecret: string }) => void;
+}) {
+  const t = useTranslations("integrations.google");
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onConnect({ clientId, clientSecret });
+      }}
+    >
+      <CredentialFields
+        clientId={clientId}
+        clientSecret={clientSecret}
+        onClientId={setClientId}
+        onClientSecret={setClientSecret}
+      />
+      <div className="space-y-1">
+        <Label htmlFor="google-redirect-uri">{t("redirectUri")}</Label>
+        <div className="flex items-center gap-2">
+          <code
+            id="google-redirect-uri"
+            className="bg-raised flex-1 truncate rounded-xs px-2 py-1 text-xs"
+          >
+            {redirectUri}
+          </code>
+          <CopyButton value={redirectUri} />
+        </div>
+        <p className="text-ink-muted text-xs">{t("redirectHelp")}</p>
+      </div>
+      <Button variant="primary" type="submit" loading={pending}>
+        {reconnect ? t("reconnect") : t("connect")}
+      </Button>
+    </form>
+  );
+}
+
+type GoogleCardProps = {
+  connection: GoogleConnectionView | null;
+  sync: GoogleSyncView | null;
+  canManage: boolean;
+  redirectUri: string;
+  flash: string | null;
+};
+
+export function GoogleCard({ connection, sync, canManage, redirectUri, flash }: GoogleCardProps) {
+  const t = useTranslations("integrations.google");
+  const { pending, connect, verify, disconnect } = useGoogleActions();
+
+  useEffect(() => {
+    if (flash && flash in FLASH_TOASTS) {
+      toast[FLASH_TOASTS[flash as keyof typeof FLASH_TOASTS]](t(`flash.${flash}`));
+    }
+  }, [flash, t]);
+
   const connected = connection?.status === "connected";
 
   return (
     <Card title={t("title")} subtitle={t("description")}>
       <div className="space-y-4" data-testid="google-card">
-        {connection && (
-          <div className="flex flex-wrap items-center gap-3">
-            <Badge tone={TONES[connection.status] ?? "neutral"} data-testid="google-status">
-              {t.has(`status.${connection.status}`)
-                ? t(`status.${connection.status}`)
-                : connection.status}
-            </Badge>
-            {connection.accountEmail && (
-              <span className="text-ink-muted text-sm">{connection.accountEmail}</span>
-            )}
-            {connection.lastCheckedAt && (
-              <span className="text-ink-muted text-xs">
-                {t("lastChecked", { date: new Date(connection.lastCheckedAt).toLocaleString() })}
-              </span>
-            )}
-          </div>
-        )}
-        {connection?.lastError && (
-          <p className="text-danger text-sm">
-            {t.has(`errors.${connection.lastError}`)
-              ? t(`errors.${connection.lastError}`)
-              : connection.lastError}
-          </p>
-        )}
+        {connection && <ConnectionStatus connection={connection} />}
 
         {sync && <SyncSummary sync={sync} />}
 
@@ -210,55 +302,12 @@ export function GoogleCard({
         )}
 
         {canManage && !connected && (
-          <form
-            className="space-y-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              connect();
-            }}
-          >
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label htmlFor="google-client-id">{t("clientId")}</Label>
-                <Input
-                  id="google-client-id"
-                  shape="rounded"
-                  value={clientId}
-                  onChange={(event) => setClientId(event.target.value)}
-                  autoComplete="off"
-                  required
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="google-client-secret">{t("clientSecret")}</Label>
-                <Input
-                  id="google-client-secret"
-                  shape="rounded"
-                  type="password"
-                  value={clientSecret}
-                  onChange={(event) => setClientSecret(event.target.value)}
-                  autoComplete="off"
-                  required
-                />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="google-redirect-uri">{t("redirectUri")}</Label>
-              <div className="flex items-center gap-2">
-                <code
-                  id="google-redirect-uri"
-                  className="bg-raised flex-1 truncate rounded-xs px-2 py-1 text-xs"
-                >
-                  {redirectUri}
-                </code>
-                <CopyButton value={redirectUri} />
-              </div>
-              <p className="text-ink-muted text-xs">{t("redirectHelp")}</p>
-            </div>
-            <Button variant="primary" type="submit" loading={pending}>
-              {connection ? t("reconnect") : t("connect")}
-            </Button>
-          </form>
+          <ConnectForm
+            reconnect={connection !== null}
+            redirectUri={redirectUri}
+            pending={pending}
+            onConnect={connect}
+          />
         )}
       </div>
     </Card>

@@ -21,25 +21,75 @@ interface ContactFormState {
   email: string;
 }
 
+function ContactFormFields({
+  form,
+  setForm,
+}: {
+  form: ContactFormState;
+  setForm: (patch: Partial<ContactFormState>) => void;
+}) {
+  const t = useTranslations("contacts");
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <Label htmlFor="contact-name">{t("name")}</Label>
+        <Input
+          shape="rounded"
+          id="contact-name"
+          value={form.displayName}
+          onChange={(e) => setForm({ displayName: e.target.value })}
+          maxLength={120}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="contact-phone">{t("phone")}</Label>
+        <Input
+          shape="rounded"
+          id="contact-phone"
+          value={form.phone}
+          onChange={(e) => setForm({ phone: e.target.value })}
+          placeholder="+55 11 99999-8888"
+          inputMode="tel"
+          maxLength={32}
+        />
+        <p className="text-ink-muted text-xs">{t("phoneHint")}</p>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="contact-email">{t("email")}</Label>
+        <Input
+          shape="rounded"
+          id="contact-email"
+          type="email"
+          value={form.email}
+          onChange={(e) => setForm({ email: e.target.value })}
+          maxLength={200}
+        />
+      </div>
+    </div>
+  );
+}
+
 /**
  * Manual contact creation — display name + strict international phone
  * (normalized to a WhatsApp chat id by the service) + optional e-mail.
  * `onCreated` receives the new/existing contact id so callers (deal form,
  * new-conversation dialog) can select it right away.
  */
-export function NewContactDialog({
-  open,
-  onOpenChange,
-  initialName,
-  initialPhone,
-  onCreated,
-}: {
+type NewContactProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialName?: string;
   initialPhone?: string;
   onCreated?: (id: string) => void;
-}) {
+};
+
+function useContactForm({
+  open,
+  onOpenChange,
+  initialName,
+  initialPhone,
+  onCreated,
+}: NewContactProps) {
   const t = useTranslations("contacts");
   const router = useRouter();
   const initialForm = (): ContactFormState => ({
@@ -72,11 +122,17 @@ export function NewContactDialog({
   }
 
   const canSubmit = form.displayName.trim() && form.phone.trim() && !pending;
+  return { form, setForm, submit, canSubmit };
+}
+
+export function NewContactDialog(props: NewContactProps) {
+  const t = useTranslations("contacts");
+  const { form, setForm, submit, canSubmit } = useContactForm(props);
 
   return (
     <Dialog
-      open={open}
-      onClose={() => onOpenChange(false)}
+      open={props.open}
+      onClose={() => props.onOpenChange(false)}
       title={t("newTitle")}
       footer={
         <Button variant="primary" onClick={submit} disabled={!canSubmit}>
@@ -84,73 +140,22 @@ export function NewContactDialog({
         </Button>
       }
     >
-      <div className="space-y-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="contact-name">{t("name")}</Label>
-          <Input
-            shape="rounded"
-            id="contact-name"
-            value={form.displayName}
-            onChange={(e) => setForm({ displayName: e.target.value })}
-            maxLength={120}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="contact-phone">{t("phone")}</Label>
-          <Input
-            shape="rounded"
-            id="contact-phone"
-            value={form.phone}
-            onChange={(e) => setForm({ phone: e.target.value })}
-            placeholder="+55 11 99999-8888"
-            inputMode="tel"
-            maxLength={32}
-          />
-          <p className="text-ink-muted text-xs">{t("phoneHint")}</p>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="contact-email">{t("email")}</Label>
-          <Input
-            shape="rounded"
-            id="contact-email"
-            type="email"
-            value={form.email}
-            onChange={(e) => setForm({ email: e.target.value })}
-            maxLength={200}
-          />
-        </div>
-      </div>
+      <ContactFormFields form={form} setForm={setForm} />
     </Dialog>
   );
 }
 
-/**
- * Outbound-first: pick a contact (or create one inline) + a connected WAHA
- * connection, open the ticket and land on the conversation to type the
- * first message. When `contact` is passed the picker is skipped.
- */
-export function NewConversationDialog({
-  open,
-  onOpenChange,
-  connections,
-  contact,
+function useStartConversation({
+  connectionId,
+  contactId,
+  close,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  connections: WahaConnectionPick[];
-  contact?: { id: string; label: string };
+  connectionId: string;
+  contactId: string;
+  close: () => void;
 }) {
   const t = useTranslations("contacts");
   const router = useRouter();
-  const [contactId, setContactId] = useState("");
-  const [connectionId, setConnectionId] = useState("");
-  const [contactBump, setContactBump] = useState(0);
-  // Name typed in the picker when "create" was clicked; null = the inline dialog is closed.
-  const [createName, setCreateName] = useState<string | null>(null);
-  useOnOpen(open, () => {
-    setContactId(contact?.id ?? "");
-    setConnectionId(connections[0]?.id ?? "");
-  });
   const [pending, startTransition] = useTransition();
 
   function submit() {
@@ -161,13 +166,119 @@ export function NewConversationDialog({
       });
       if (result.ok) {
         toast.success(t("conversationStarted"));
-        onOpenChange(false);
+        close();
         router.push(`/app/inbox/${result.id}`);
       } else {
         toast.error(result.error);
       }
     });
   }
+  return { pending, submit };
+}
+
+function ConversationContactField({
+  contact,
+  value,
+  onChange,
+  refreshKey,
+  onCreateClick,
+}: {
+  contact?: { id: string; label: string };
+  value: string;
+  onChange: (id: string) => void;
+  refreshKey: number;
+  onCreateClick: (query: string) => void;
+}) {
+  const t = useTranslations("contacts");
+  return (
+    <div className="space-y-1.5">
+      <Label>{t("contact")}</Label>
+      {contact ? (
+        <p className="text-sm">{contact.label}</p>
+      ) : (
+        <ContactSelect
+          value={value}
+          onChange={(id) => onChange(id)}
+          refreshKey={refreshKey}
+          onlyWhatsApp
+          onCreateClick={onCreateClick}
+        />
+      )}
+    </div>
+  );
+}
+
+function ConversationConnectionField({
+  connections,
+  value,
+  onChange,
+}: {
+  connections: WahaConnectionPick[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const t = useTranslations("contacts");
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="conv-connection">{t("connection")}</Label>
+      {connections.length === 0 ? (
+        <p className="text-ink-muted text-sm">{t("noConnection")}</p>
+      ) : (
+        <Select
+          options={connections.map((c) => ({ value: c.id, label: c.name }))}
+          value={value || undefined}
+          onChange={onChange}
+          id="conv-connection"
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Outbound-first: pick a contact (or create one inline) + a connected WAHA
+ * connection, open the ticket and land on the conversation to type the
+ * first message. When `contact` is passed the picker is skipped.
+ */
+function StartButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
+  const t = useTranslations("contacts");
+  return (
+    <Button variant="primary" onClick={onClick} disabled={disabled}>
+      {t("startConversation")}
+    </Button>
+  );
+}
+
+type NewConversationProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  connections: WahaConnectionPick[];
+  contact?: { id: string; label: string };
+};
+
+function useConversationPicker({ open, connections, contact }: NewConversationProps) {
+  const [contactId, setContactId] = useState("");
+  const [connectionId, setConnectionId] = useState("");
+  const [contactBump, setContactBump] = useState(0);
+  useOnOpen(open, () => {
+    setContactId(contact?.id ?? "");
+    setConnectionId(connections[0]?.id ?? "");
+  });
+  return { contactId, setContactId, connectionId, setConnectionId, contactBump, setContactBump };
+}
+
+export function NewConversationDialog(props: NewConversationProps) {
+  const { open, onOpenChange, connections, contact } = props;
+  const t = useTranslations("contacts");
+  const picker = useConversationPicker(props);
+  const { contactId, connectionId } = picker;
+  // Name typed in the picker when "create" was clicked; null = the inline dialog is closed.
+  const [createName, setCreateName] = useState<string | null>(null);
+  const { pending, submit } = useStartConversation({
+    connectionId,
+    contactId,
+    close: () => onOpenChange(false),
+  });
 
   return (
     <>
@@ -175,47 +286,21 @@ export function NewConversationDialog({
         open={open}
         onClose={() => onOpenChange(false)}
         title={t("newConversation")}
-        footer={
-          <Button
-            variant="primary"
-            onClick={submit}
-            disabled={!contactId || !connectionId || pending}
-          >
-            {t("startConversation")}
-          </Button>
-        }
+        footer={<StartButton onClick={submit} disabled={!contactId || !connectionId || pending} />}
       >
         <div className="space-y-4">
-          {contact ? (
-            <div className="space-y-1.5">
-              <Label>{t("contact")}</Label>
-              <p className="text-sm">{contact.label}</p>
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              <Label>{t("contact")}</Label>
-              <ContactSelect
-                value={contactId}
-                onChange={(id) => setContactId(id)}
-                refreshKey={contactBump}
-                onlyWhatsApp
-                onCreateClick={setCreateName}
-              />
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label htmlFor="conv-connection">{t("connection")}</Label>
-            {connections.length === 0 ? (
-              <p className="text-ink-muted text-sm">{t("noConnection")}</p>
-            ) : (
-              <Select
-                options={connections.map((c) => ({ value: c.id, label: c.name }))}
-                value={connectionId || undefined}
-                onChange={setConnectionId}
-                id="conv-connection"
-              />
-            )}
-          </div>
+          <ConversationContactField
+            contact={contact}
+            value={contactId}
+            onChange={picker.setContactId}
+            refreshKey={picker.contactBump}
+            onCreateClick={setCreateName}
+          />
+          <ConversationConnectionField
+            connections={connections}
+            value={connectionId}
+            onChange={picker.setConnectionId}
+          />
         </div>
       </Dialog>
       <NewContactDialog
@@ -223,8 +308,8 @@ export function NewConversationDialog({
         onOpenChange={(next) => !next && setCreateName(null)}
         initialName={createName ?? ""}
         onCreated={(id) => {
-          setContactId(id);
-          setContactBump((b) => b + 1);
+          picker.setContactId(id);
+          picker.setContactBump((b) => b + 1);
         }}
       />
     </>

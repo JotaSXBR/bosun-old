@@ -201,10 +201,10 @@ function validate(days: Record<string, DayState>, t: HoursT): string | null {
 
 function useHoursSubmit(
   days: Record<string, DayState>,
-  message: string,
-  mediaMessage: string,
+  messages: { message: string; mediaMessage: string },
   th: HoursT,
 ) {
+  const { message, mediaMessage } = messages;
   const t = useTranslations("settings");
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -285,7 +285,7 @@ export function HoursForm({
   const [days, setDays] = useState(() => toDayState(businessHours));
   const [message, setMessage] = useState(offHoursMessage ?? "");
   const [mediaMessage, setMediaMessage] = useState(unsupportedMediaMessage ?? "");
-  const { isPending, onSubmit } = useHoursSubmit(days, message, mediaMessage, th);
+  const { isPending, onSubmit } = useHoursSubmit(days, { message, mediaMessage }, th);
 
   return (
     <div className="space-y-6" data-testid="hours-form">

@@ -16,6 +16,7 @@ import { toast } from "@crm/design-system/components/toast";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import type { UseFormReturn } from "react-hook-form";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
@@ -79,13 +80,79 @@ const emptyValues = (kind: FormValues["kind"]): FormValues =>
 
 type Created = Extract<CreateConnectionResult, { ok: true }>;
 
-export function NewConnectionForm() {
+type ConnForm = UseFormReturn<FormValues>;
+
+function KindNameRow({ form }: { form: ConnForm }) {
   const t = useTranslations("integrations");
-  const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema(t)),
-    defaultValues: { kind: "waha", name: "" },
-  });
-  const kind = useWatch({ control: form.control, name: "kind" });
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <FormField
+        control={form.control}
+        name="kind"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t("form.channel")}</FormLabel>
+            <FormControl>
+              <Select
+                options={[
+                  { value: "waha", label: t("form.kindWaha") },
+                  { value: "meta_cloud", label: t("form.kindMeta") },
+                  { value: "site_chat", label: t("form.kindSiteChat") },
+                ]}
+                value={field.value}
+                onChange={field.onChange}
+                name={field.name}
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={form.control}
+        name="name"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t("form.name")}</FormLabel>
+            <FormControl>
+              <Input shape="rounded" placeholder={t("form.namePlaceholder")} {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    </div>
+  );
+}
+
+function MetaFields({ form }: { form: ConnForm }) {
+  const t = useTranslations("integrations");
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      {META_FIELDS.map((item) => (
+        <FormField
+          key={`meta_cloud-${item.name}`}
+          control={form.control}
+          name={item.name}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>
+                {item.name === "graphApiVersion" ? t("form.graphApiVersion") : item.label}
+              </FormLabel>
+              <FormControl>
+                <Input shape="rounded" placeholder={item.placeholder} {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      ))}
+    </div>
+  );
+}
+
+function useCreateConnection(form: ConnForm) {
+  const t = useTranslations("integrations");
   const [pairing, setPairing] = useState<{ id: string; qr?: QrCode } | null>(null);
 
   function announce(kind: FormValues["kind"], result: Created) {
@@ -118,69 +185,24 @@ export function NewConnectionForm() {
     announce(kind, result);
   }
 
+  return { pairing, setPairing, onSubmit };
+}
+
+export function NewConnectionForm() {
+  const t = useTranslations("integrations");
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema(t)),
+    defaultValues: { kind: "waha", name: "" },
+  });
+  const kind = useWatch({ control: form.control, name: "kind" });
+  const { pairing, setPairing, onSubmit } = useCreateConnection(form);
+
   return (
     <Card title={t("form.title")} subtitle={t("form.description")}>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <FormField
-              control={form.control}
-              name="kind"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t("form.channel")}</FormLabel>
-                  <FormControl>
-                    <Select
-                      options={[
-                        { value: "waha", label: t("form.kindWaha") },
-                        { value: "meta_cloud", label: t("form.kindMeta") },
-                        { value: "site_chat", label: t("form.kindSiteChat") },
-                      ]}
-                      value={field.value}
-                      onChange={field.onChange}
-                      name={field.name}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="name"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t("form.name")}</FormLabel>
-                  <FormControl>
-                    <Input shape="rounded" placeholder={t("form.namePlaceholder")} {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
-          {kind === "meta_cloud" && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {META_FIELDS.map((item) => (
-                <FormField
-                  key={`${kind}-${item.name}`}
-                  control={form.control}
-                  name={item.name}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>
-                        {item.name === "graphApiVersion" ? t("form.graphApiVersion") : item.label}
-                      </FormLabel>
-                      <FormControl>
-                        <Input shape="rounded" placeholder={item.placeholder} {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              ))}
-            </div>
-          )}
+          <KindNameRow form={form} />
+          {kind === "meta_cloud" && <MetaFields form={form} />}
           <Button variant="primary" type="submit" disabled={form.formState.isSubmitting}>
             {t("form.submit")}
           </Button>

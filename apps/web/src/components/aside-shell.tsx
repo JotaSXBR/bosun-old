@@ -8,6 +8,47 @@ import { Icon } from "@crm/design-system/components/icon";
 import { cn } from "@crm/design-system/lib/utils";
 import { useState } from "react";
 
+type ToggleProps = { label: string; onClick: () => void };
+
+/** <xl drawer trigger — floats above the thread. */
+function DrawerTrigger({ label, onClick }: ToggleProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className="bg-raised border-line text-ink shadow-pop fixed right-4 bottom-4 z-30 flex size-10 items-center justify-center rounded-full border xl:hidden"
+    >
+      <Icon name="panel-left" className="size-4" />
+    </button>
+  );
+}
+
+function Backdrop({ label, onClick }: ToggleProps) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      className="fixed inset-0 z-30 bg-black/50 xl:hidden"
+      onClick={onClick}
+    />
+  );
+}
+
+/** xl+ collapsed strip — the affordance that re-opens the aside. */
+function CollapsedStrip({ label, onClick }: ToggleProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className="border-line bg-page text-ink-muted hover:text-ink hidden w-9 shrink-0 items-start justify-center border-l pt-4 xl:flex"
+    >
+      <Icon name="panel-left" className="size-4" />
+    </button>
+  );
+}
+
 export function AsideShell({
   children,
   openLabel,
@@ -19,26 +60,15 @@ export function AsideShell({
 }) {
   const [desktopOpen, setDesktopOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const close = () => {
+    setMobileOpen(false);
+    setDesktopOpen(false);
+  };
 
   return (
     <>
-      {/* <xl drawer trigger — floats above the thread. */}
-      <button
-        type="button"
-        onClick={() => setMobileOpen(true)}
-        aria-label={openLabel}
-        className="bg-raised border-line text-ink shadow-pop fixed right-4 bottom-4 z-30 flex size-10 items-center justify-center rounded-full border xl:hidden"
-      >
-        <Icon name="panel-left" className="size-4" />
-      </button>
-      {mobileOpen && (
-        <button
-          type="button"
-          aria-label={closeLabel}
-          className="fixed inset-0 z-30 bg-black/50 xl:hidden"
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
+      <DrawerTrigger label={openLabel} onClick={() => setMobileOpen(true)} />
+      {mobileOpen && <Backdrop label={closeLabel} onClick={() => setMobileOpen(false)} />}
       <aside
         data-open={desktopOpen || undefined}
         className={cn(
@@ -51,10 +81,7 @@ export function AsideShell({
         <div className="flex justify-end">
           <button
             type="button"
-            onClick={() => {
-              setMobileOpen(false);
-              setDesktopOpen(false);
-            }}
+            onClick={close}
             aria-label={closeLabel}
             className="text-ink-muted hover:text-ink rounded-xs p-1"
           >
@@ -63,17 +90,7 @@ export function AsideShell({
         </div>
         {children}
       </aside>
-      {/* xl+ collapsed strip — the affordance that re-opens the aside. */}
-      {!desktopOpen && (
-        <button
-          type="button"
-          onClick={() => setDesktopOpen(true)}
-          aria-label={openLabel}
-          className="border-line bg-page text-ink-muted hover:text-ink hidden w-9 shrink-0 items-start justify-center border-l pt-4 xl:flex"
-        >
-          <Icon name="panel-left" className="size-4" />
-        </button>
-      )}
+      {!desktopOpen && <CollapsedStrip label={openLabel} onClick={() => setDesktopOpen(true)} />}
     </>
   );
 }

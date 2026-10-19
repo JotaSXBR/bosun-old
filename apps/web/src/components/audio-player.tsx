@@ -141,6 +141,120 @@ function useWaveSeek(args: {
   return { seekFromPointer, onWaveKey };
 }
 
+function PlayButton({
+  playing,
+  label,
+  onClick,
+}: {
+  playing: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className="bg-ink-on-signal/20 flex size-8 shrink-0 items-center justify-center rounded-full"
+    >
+      <Icon name={playing ? "pause" : "play"} className="size-4" />
+    </button>
+  );
+}
+
+function SpeedButton({
+  speed,
+  label,
+  onClick,
+}: {
+  speed: number;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className="bg-ink-on-signal/20 shrink-0 rounded-xs px-1.5 py-0.5 text-xs font-medium tabular-nums"
+    >
+      {speed}×
+    </button>
+  );
+}
+
+function Waveform({
+  bars,
+  played,
+  valueText,
+  label,
+  seekFromPointer,
+  onWaveKey,
+}: {
+  bars: number[];
+  played: number;
+  valueText: string;
+  label: string;
+  seekFromPointer: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onWaveKey: (e: React.KeyboardEvent<HTMLDivElement>) => void;
+}) {
+  return (
+    <div
+      role="slider"
+      tabIndex={0}
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(played * 100)}
+      aria-valuetext={valueText}
+      className="flex h-6 min-w-0 flex-1 cursor-pointer touch-none items-center gap-px"
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        seekFromPointer(e);
+      }}
+      onPointerMove={(e) => {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) seekFromPointer(e);
+      }}
+      onKeyDown={onWaveKey}
+      data-testid="audio-waveform"
+    >
+      {bars.map((p, i) => (
+        <span
+          key={i}
+          aria-hidden
+          className={cn(
+            "h-(--bar-h) min-w-0.5 flex-1 rounded-full",
+            i / bars.length < played ? "bg-current" : "bg-current/35",
+          )}
+          style={{ "--bar-h": `${Math.round(p * 100)}%` } as CSSProperties}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** <audio> handlers that mirror the element into state. */
+function useAudioEvents(setters: {
+  setPlaying: (playing: boolean) => void;
+  setElapsed: (seconds: number) => void;
+  setDuration: (seconds: number) => void;
+}) {
+  const { setPlaying, setElapsed, setDuration } = setters;
+  const syncDuration = (e: React.SyntheticEvent<HTMLAudioElement>) => {
+    const d = e.currentTarget.duration;
+    if (Number.isFinite(d)) setDuration(d);
+  };
+  return {
+    onPlay: () => setPlaying(true),
+    onPause: () => setPlaying(false),
+    onTimeUpdate: (e: React.SyntheticEvent<HTMLAudioElement>) =>
+      setElapsed(e.currentTarget.currentTime),
+    onLoadedMetadata: syncDuration,
+    onDurationChange: syncDuration,
+    onEnded: () => setElapsed(0),
+  };
+}
+
 export function AudioPlayer({
   src,
   durationHint,
@@ -158,76 +272,28 @@ export function AudioPlayer({
   const { displayTotal, played } = playbackTotals(duration, durationHint, elapsed);
   const { playing, setPlaying, speed, cycleSpeed, toggle } = usePlayback(audioRef);
   const { seekFromPointer, onWaveKey } = useWaveSeek({ audioRef, displayTotal, setElapsed });
+  const audioEvents = useAudioEvents({ setPlaying, setElapsed, setDuration });
 
   return (
     <div className="flex w-64 max-w-full items-center gap-2" data-testid="audio-player">
-      <audio
-        ref={audioRef}
-        src={src}
-        preload="metadata"
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onTimeUpdate={(e) => setElapsed(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => {
-          const d = e.currentTarget.duration;
-          if (Number.isFinite(d)) setDuration(d);
-        }}
-        onDurationChange={(e) => {
-          const d = e.currentTarget.duration;
-          if (Number.isFinite(d)) setDuration(d);
-        }}
-        onEnded={() => setElapsed(0)}
-      />
-      <button
-        type="button"
+      <audio ref={audioRef} src={src} preload="metadata" {...audioEvents} />
+      <PlayButton
+        playing={playing}
+        label={playing ? t("audioPause") : t("audioPlay")}
         onClick={toggle}
-        aria-label={playing ? t("audioPause") : t("audioPlay")}
-        className="bg-ink-on-signal/20 flex size-8 shrink-0 items-center justify-center rounded-full"
-      >
-        <Icon name={playing ? "pause" : "play"} className="size-4" />
-      </button>
-      <div
-        role="slider"
-        tabIndex={0}
-        aria-label={t("audioSeek")}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(played * 100)}
-        aria-valuetext={`${formatTime(elapsed)} / ${formatTime(displayTotal)}`}
-        className="flex h-6 min-w-0 flex-1 cursor-pointer touch-none items-center gap-px"
-        onPointerDown={(e) => {
-          e.currentTarget.setPointerCapture(e.pointerId);
-          seekFromPointer(e);
-        }}
-        onPointerMove={(e) => {
-          if (e.currentTarget.hasPointerCapture(e.pointerId)) seekFromPointer(e);
-        }}
-        onKeyDown={onWaveKey}
-        data-testid="audio-waveform"
-      >
-        {bars.map((p, i) => (
-          <span
-            key={i}
-            aria-hidden
-            className={cn(
-              "h-(--bar-h) min-w-0.5 flex-1 rounded-full",
-              i / bars.length < played ? "bg-current" : "bg-current/35",
-            )}
-            style={{ "--bar-h": `${Math.round(p * 100)}%` } as CSSProperties}
-          />
-        ))}
-      </div>
+      />
+      <Waveform
+        bars={bars}
+        played={played}
+        valueText={`${formatTime(elapsed)} / ${formatTime(displayTotal)}`}
+        label={t("audioSeek")}
+        seekFromPointer={seekFromPointer}
+        onWaveKey={onWaveKey}
+      />
       <span className="min-w-9 shrink-0 text-xs tabular-nums">
         {formatTime(playing || elapsed > 0 ? elapsed : displayTotal)}
       </span>
-      <button
-        type="button"
-        onClick={cycleSpeed}
-        aria-label={t("audioSpeed")}
-        className="bg-ink-on-signal/20 shrink-0 rounded-xs px-1.5 py-0.5 text-xs font-medium tabular-nums"
-      >
-        {speed}×
-      </button>
+      <SpeedButton speed={speed} label={t("audioSpeed")} onClick={cycleSpeed} />
     </div>
   );
 }

@@ -53,9 +53,9 @@ async function findAvailableSlug(
 async function createOrg(
   auth: Auth,
   requestHeaders: RequestHeaders,
-  name: string,
-  slug: string,
+  input: { name: string; slug: string },
 ): Promise<{ id: string } | null> {
+  const { name, slug } = input;
   try {
     return await auth.api.createOrganization({
       body: { name, slug },
@@ -102,7 +102,7 @@ async function provisionOrganization(input: {
 }): Promise<CreateOrganizationResult> {
   const { auth, requestHeaders, session, name } = input;
   const slug = await findAvailableSlug(auth, requestHeaders, slugify(name));
-  const org = slug ? await createOrg(auth, requestHeaders, name, slug) : null;
+  const org = slug ? await createOrg(auth, requestHeaders, { name, slug }) : null;
   if (!org) return { ok: false, error: "Não foi possível criar a organização." };
 
   await auth.api.setActiveOrganization({
