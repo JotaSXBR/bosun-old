@@ -69,6 +69,7 @@ export function sseResponse(options: SseOptions): Response {
           .finally(close);
       };
       signal.addEventListener("abort", cleanup, { once: true });
+      if (signal.aborted) cleanup(); // the listener never fires for an already-aborted signal
     },
     cancel() {
       cleanup();

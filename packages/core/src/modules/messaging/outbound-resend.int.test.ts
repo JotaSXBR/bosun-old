@@ -106,6 +106,57 @@ afterAll(async () => {
 });
 
 describe("resendFailedMessage", () => {
+  it.each([
+    [
+      "a rejected promise",
+      (p: FakeChannelProvider) => {
+        p.sendMessageError = new Error("offline");
+      },
+    ],
+    [
+      "a synchronous throw",
+      (p: FakeChannelProvider) => {
+        p.sendMessage = () => {
+          throw new Error("offline");
+        };
+      },
+    ],
+  ])(
+    "maps %s from the provider to SEND_FAILED and keeps the message failed",
+    async (_name, breakProvider) => {
+      const ticket = await newTicket(
+        `res-fail-${crypto.randomUUID().slice(0, 6)}@c.us`,
+        `false_rf${crypto.randomUUID().slice(0, 6)}@c.us_1`,
+        new Date("2024-04-08"),
+      );
+      const first = new FakeChannelProvider();
+      first.sendMessageError = new Error("session offline");
+      await expect(
+        sendOutboundMessage(db, ctx(orgA, "agent"), {
+          input: { conversationId: ticket.id, text: "falha" },
+          deps: { provider: first },
+        }),
+      ).rejects.toThrowError(/failed to send/i);
+      const failed = (
+        await listConversationMessages(db, ctx(orgA, "agent"), { conversationId: ticket.id })
+      ).find((m) => m.status === "failed")!;
+
+      const broken = new FakeChannelProvider();
+      breakProvider(broken);
+      await expect(
+        resendFailedMessage(db, ctx(orgA, "agent"), {
+          input: { conversationId: ticket.id, messageId: failed.id },
+          deps: { provider: broken },
+        }),
+      ).rejects.toMatchObject({ code: "SEND_FAILED" });
+
+      const after = (
+        await listConversationMessages(db, ctx(orgA, "agent"), { conversationId: ticket.id })
+      ).find((m) => m.id === failed.id)!;
+      expect(after.status).toBe("failed");
+    },
+  );
+
   it("resends a failed text message in place and claims the ticket", async () => {
     const ticket = await newTicket("res-1@c.us", "false_res1@c.us_1", new Date("2024-04-08"));
     const failing = new FakeChannelProvider();

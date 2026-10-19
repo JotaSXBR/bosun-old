@@ -232,6 +232,23 @@ describe("editMessageContent", () => {
     });
   });
 
+  it("still edits a message sent 14 minutes ago (inside the window)", async () => {
+    const ticket = await newTicket("ed-3@c.us", "false_ed3@c.us_1");
+    const provider = new FakeChannelProvider();
+    const reply = await sendReply(ticket.id, provider);
+    await withTenant(db, orgA, (tx) =>
+      tx
+        .update(messages)
+        .set({ sentAt: new Date(Date.now() - 14 * 60_000) })
+        .where(eq(messages.id, reply.id)),
+    );
+    await editMessageContent(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, messageId: reply.id, text: "editado" },
+      deps: { provider },
+    });
+    expect(provider.edits).toHaveLength(1);
+  });
+
   it("rejects editing inbound messages and expired windows", async () => {
     const ticket = await newTicket("ed-2@c.us", "false_ed2@c.us_1");
     const provider = new FakeChannelProvider();

@@ -89,6 +89,24 @@ describe("inbox views", () => {
 });
 
 describe("resumeTicket", () => {
+  it("resumes a closed ticket, and refuses while a follow-up is already active", async () => {
+    const ticket = await newTicket("res-2@c.us", "false_r2@c.us_1", new Date("2024-04-06"));
+    const resolved = await resolveConversation(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id },
+    });
+    await withTenant(db, orgA, (tx) =>
+      tx.update(conversations).set({ status: "closed" }).where(eq(conversations.id, resolved.id)),
+    );
+
+    const follow = await resumeTicket(db, ctx(orgA, "agent"), { conversationId: resolved.id });
+    expect(follow.precededById).toBe(resolved.id);
+    expect(follow.status).toBe("in_progress");
+
+    await expect(
+      resumeTicket(db, ctx(orgA, "agent"), { conversationId: resolved.id }),
+    ).rejects.toMatchObject({ code: "ACTIVE_TICKET_EXISTS" });
+  });
+
   it("resumeTicket creates an in_progress follow-up assigned to the caller", async () => {
     const ticket = await newTicket("res-1@c.us", "false_r1@c.us_1", new Date("2024-04-06"));
     const resolved = await resolveConversation(db, ctx(orgA, "agent"), {

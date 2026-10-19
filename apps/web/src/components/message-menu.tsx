@@ -42,7 +42,10 @@ export function useMessageMenuState(currentText: string) {
 
 export type MenuState = ReturnType<typeof useMessageMenuState>;
 
-/** Callers pass wider objects (menu props); a Server Action must only get the ids. */
+/**
+ * Callers pass wider objects (the menu props, with callbacks and refs); a
+ * Server Action must only get the ids — e2e/message-context-menu.spec.ts guards it.
+ */
 const pickTarget = ({ conversationId, messageId }: TargetProps): TargetProps => ({
   conversationId,
   messageId,
