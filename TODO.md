@@ -647,13 +647,6 @@ invitation:create`): lista + convites pendentes com **link copiável
   PRs #1 e #2 foram criadas via `gh` fallback). Diagnosticar se é
   transporte/sessão do MCP local. Regra atual: MCP primeiro, `gh` CLI como
   fallback em operações de pull request após a primeira falha (AGENTS.md).
-- **P3 — `no-inline-styles` do `deal-card`** — 2 warnings restantes
-  (`transform`/`transition` do dnd-kit em `deal-card.tsx`); decidir entre
-  aceitar animação levemente diferente com classes/variáveis CSS ou um
-  override documentado em `tooling/eslint`. Orçamento em
-  `docs/development/code-quality-standard.md` §2.3. (Zerar os warnings de
-  lint e promover as regras a `error` foi concluído em 2026-10-19,
-  branch `chore/lint-warnings`.)
 
 ## Concluído
 

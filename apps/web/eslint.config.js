@@ -40,7 +40,7 @@ const config = [
     rules: {
       "shadcn/no-arbitrary-values": "error",
       "shadcn/no-raw-colors": "error",
-      "shadcn/no-inline-styles": "warn",
+      "shadcn/no-inline-styles": "error",
       "shadcn/require-static-classes": "error",
       "shadcn/no-unknown-classes": "error",
     },

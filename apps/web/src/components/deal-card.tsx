@@ -97,7 +97,9 @@ type DealCardViewProps = DealCardProps & {
   dragHandleProps?: Record<string, unknown>;
   containerRef?: (el: HTMLElement | null) => void;
   dragging?: boolean;
-  style?: CSSProperties;
+  /** dnd-kit's sortable transform, handed over as a CSS variable (no inline style props). */
+  dragTransform?: string;
+  animating?: boolean;
 };
 
 function DealLabelChips({ labels }: { labels: DealCardRow["labels"] }) {
@@ -123,7 +125,8 @@ export function DealCardView({
   dragHandleProps,
   containerRef,
   dragging,
-  style,
+  dragTransform,
+  animating,
   ...card
 }: DealCardViewProps) {
   const { deal, canWrite } = card;
@@ -131,10 +134,12 @@ export function DealCardView({
   return (
     <div
       ref={containerRef}
-      style={style}
+      style={dragTransform ? ({ "--drag-transform": dragTransform } as CSSProperties) : undefined}
       data-testid={`deal-card-${deal.id}`}
       className={cn(
         "bg-surface group shadow-control rounded-md border p-3",
+        dragTransform && "transform-(--drag-transform)",
+        animating && "transition-transform duration-200 ease-out",
         dragging && "shadow-raised opacity-60",
       )}
     >
@@ -177,7 +182,8 @@ export function SortableDealCard(props: DealCardProps) {
       containerRef={setNodeRef}
       dragging={isDragging}
       dragHandleProps={{ ...attributes, ...listeners }}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
+      dragTransform={CSS.Transform.toString(transform) ?? undefined}
+      animating={Boolean(transition)}
     />
   );
 }

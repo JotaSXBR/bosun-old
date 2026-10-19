@@ -229,19 +229,16 @@ the same commit that removes it from this table. The 2026-10 lint-warnings
 cleanup (`chore/lint-warnings`) zeroed and promoted every size/complexity
 rule and the defect-adjacent stylistic ones; what is left:
 
-| Rule                           | Threshold            | Violations |
-| ------------------------------ | -------------------- | ---------- |
-| `playwright/no-useless-not`    | preset warn          | 1          |
-| `shadcn/no-inline-styles`      | design-system config | 2          |
-| `security/detect-unsafe-regex` | heuristic            | —          |
-| `react/no-multi-comp`          | ignoreStateless      | —          |
+| Rule                           | Threshold       | Violations |
+| ------------------------------ | --------------- | ---------- |
+| `playwright/no-useless-not`    | preset warn     | 1          |
+| `security/detect-unsafe-regex` | heuristic       | —          |
+| `react/no-multi-comp`          | ignoreStateless | —          |
 
-The two `no-inline-styles` are in `deal-card.tsx`: dnd-kit's `transform` and
-`transition` are runtime values that token classes cannot express without
-changing the drag animation. `security/detect-unsafe-regex` is a heuristic
+`deal-card.tsx` hands dnd-kit's sortable transform over as the `--drag-transform` CSS variable (class `transform-(--drag-transform)`), so `shadcn/no-inline-styles` reached zero and is `error`. The drag-settle animation now uses the fixed `transition-transform duration-200 ease-out` instead of dnd-kit's own transition string. `security/detect-unsafe-regex` is a heuristic
 and stays a warn by design.
 
-Promoted to **error** on zero measured violations: `max-lines-per-function` (50), `max-statements` (10), `max-params` (3), `max-lines` (300), `sonarjs/cognitive-complexity` (15), `no-empty-function`, `dot-notation`, `non-nullable-type-assertion-style`, `prefer-includes`, `prefer-nullish-coalescing`, `no-unnecessary-condition`, `vitest/no-conditional-expect`, `shadcn/require-static-classes`, plus the earlier set: `complexity` (20),
+Promoted to **error** on zero measured violations: `max-lines-per-function` (50), `max-statements` (10), `max-params` (3), `max-lines` (300), `sonarjs/cognitive-complexity` (15), `no-empty-function`, `dot-notation`, `non-nullable-type-assertion-style`, `prefer-includes`, `prefer-nullish-coalescing`, `no-unnecessary-condition`, `vitest/no-conditional-expect`, `shadcn/no-inline-styles`, `shadcn/require-static-classes`, plus the earlier set: `complexity` (20),
 `max-depth` (4), `max-nested-callbacks` (10), all of
 `stylisticTypeChecked` except the two off-rules and the warns above, the
 security subset (§1.6), both drizzle where-guards,
