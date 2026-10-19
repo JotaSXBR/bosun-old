@@ -1,5 +1,7 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "cacheMaxSize": "10GB",
+  "cacheMaxAge": "7d",
   "ui": "stream",
   "tasks": {
     "build": {

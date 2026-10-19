@@ -28,6 +28,10 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: { bodySizeLimit: "65mb" },
     proxyClientMaxBodySize: "65mb",
+    // Avoid unbounded .next/dev/cache growth (was ~8 GB). Turborepo still
+    // caches build outputs, so production builds remain cached.
+    turbopackFileSystemCacheForDev: false,
+    turbopackFileSystemCacheForBuild: false,
   },
   headers() {
     return Promise.resolve([
