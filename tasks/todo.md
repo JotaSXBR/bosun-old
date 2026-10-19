@@ -20,8 +20,8 @@ PR B = tarefas 1, 3, 4, 5 (branch `test/coverage-debt`). Um commit por tarefa.
 
 ## Task 3: Testes unitários baratos
 
-- [ ] `packages/automation/src/boss.test.ts` (pg-boss mockado): cada valor de `QUEUES` tem um `work()`; 5 crons esperados; handler recebe `job.data`
-- [ ] `apps/web/src/server/find-conversation.test.ts`: `NotFoundError` → `null`; outro erro relançado; sucesso devolve a linha
+- [x] `packages/automation/src/boss.test.ts` (pg-boss mockado): cada valor de `QUEUES` tem um `work()`; 5 crons esperados; handler recebe `job.data`
+- [x] `apps/web/src/server/find-conversation.test.ts`: `NotFoundError` → `null`; outro erro relançado; sucesso devolve a linha
 - **Acceptance**: testes novos passam e viram RED se a tabela/mapeamento for alterado
 - **Verify**: `pnpm --filter @crm/automation test` · `pnpm --filter @crm/web test`
 - **Deps**: nenhuma · **Tamanho**: S
