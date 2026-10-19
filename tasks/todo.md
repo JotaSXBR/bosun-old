@@ -41,14 +41,14 @@ Plano: `tasks/plan.md`. Branch: `chore/lint-warnings`. Um commit por tarefa,
 
 ## Task 5: `core` — `max-statements`, `max-lines-per-function`, `cognitive-complexity`
 
-- [ ] Extrair passos nomeados sem reordenar efeitos (transações, enqueue, auditoria)
+- [x] Extrair passos nomeados sem reordenar efeitos (transações, enqueue, auditoria)
 - **Acceptance**: 0 dessas regras em `@crm/core`
 - **Verify**: `pnpm --filter @crm/core test` + integração; revisão atenta do diff em `withTenant`
 - **Deps**: 4 · **Tamanho**: L
 
 ## Task 6: `core` — `max-lines`
 
-- [ ] 6 arquivos de produção e 10 de teste divididos por assunto; mesma contagem de casos
+- [x] 6 arquivos de produção e 10 de teste divididos por assunto; mesma contagem de casos
 - **Acceptance**: 0 `max-lines` em `@crm/core`; nº de testes igual
 - **Verify**: contagem do vitest antes/depois · `pnpm --filter @crm/core test`
 - **Deps**: 5 · **Tamanho**: M
@@ -73,7 +73,7 @@ Plano: `tasks/plan.md`. Branch: `chore/lint-warnings`. Um commit por tarefa,
 
 ## Task 9: `web` — `max-lines-per-function`, `max-lines`, `cognitive-complexity`
 
-- [ ] ≈80: dividir componentes e arquivos por responsabilidade; mesmo markup/estilos
+- [x] ≈80: dividir componentes e arquivos por responsabilidade; mesmo markup/estilos
 - **Acceptance**: `pnpm --filter @crm/web lint` limpo
 - **Verify**: lint · testes · e2e dos fluxos tocados; sem mudar classes de design-system
 - **Deps**: 8 · **Tamanho**: L
