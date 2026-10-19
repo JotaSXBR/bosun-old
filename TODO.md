@@ -648,12 +648,7 @@ invitation:create`): lista + convites pendentes com **link copiável
   transporte/sessão do MCP local. Regra atual: MCP primeiro, `gh` CLI como
   fallback em operações de pull request após a primeira falha (AGENTS.md).
 
-- **P3 — Testes diretos do que o lint tocou** — gaps do `/ship` do PR #52
-  (2026-10-19), em andamento no plano `tasks/plan.md`: `boss.ts`
-  (WORKERS/SCHEDULES só conferidos por leitura), `findConversation`,
-  `useRunAction`/`useOnOpen` (o `web` não tem camada de teste de
-  componente: entra `jsdom` + `@testing-library/react`), e2e de arrastar
-  card no kanban e do macro-picker.
+- **P3 — Testes ainda sem cobertura direta** (depois do PR de 2026-10-19, que fechou `boss.ts`, `findConversation`, `useRunAction`/`useOnOpen`, o arrasto do kanban e o macro-picker): fluxo de proposta de macro por agente sem permissão de escrita (precisa de um segundo membro), `Escape` e setas do macro-picker, menu "▾" da mensagem e o sucesso de reagir/editar/excluir contra um provider real.
 - **P3 — Fora desta rodada (por decisão)**: audio-player e voice-recorder
   (testados à mão no staging; voice precisa de mídia falsa no Chromium e
   seria flaky) e o design-system (Card/Tag/Select/RingChart sem teste de

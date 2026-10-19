@@ -38,12 +38,12 @@ PR B = tarefas 1, 3, 4, 5 (branch `test/coverage-debt`). Um commit por tarefa.
 
 ## Task 5: e2e do kanban e do macro-picker
 
-- [ ] `deals.spec.ts` (ou spec novo): arrastar um card para outra etapa persiste após reload; menu "Mover para" move
-- [ ] spec do macro-picker: digitar `/` abre o picker e inserir uma macro preenche o campo
+- [x] `deals.spec.ts` (ou spec novo): arrastar um card para outra etapa persiste após reload; menu "Mover para" move
+- [x] spec do macro-picker: digitar `/` abre o picker e inserir uma macro preenche o campo
 - **Acceptance**: specs estáveis (3 rodadas verdes seguidas), sem `waitForTimeout`
 - **Verify**: `pnpm --filter @crm/web exec playwright test e2e/<arquivo> --reporter=line`
 - **Deps**: nenhuma · **Tamanho**: M
 
 ### Checkpoint: fim
 
-- [ ] `pnpm verify:full` verde nos dois PRs · CI verde · revisar com o humano
+- [x] `pnpm verify:full` verde nos dois PRs · CI verde · revisar com o humano
