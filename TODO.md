@@ -648,6 +648,25 @@ invitation:create`): lista + convites pendentes com **link copiável
   transporte/sessão do MCP local. Regra atual: MCP primeiro, `gh` CLI como
   fallback em operações de pull request após a primeira falha (AGENTS.md).
 
+- **P3 — Testes diretos do que o lint tocou** — gaps do `/ship` do PR #52
+  (2026-10-19), em andamento no plano `tasks/plan.md`: `boss.ts`
+  (WORKERS/SCHEDULES só conferidos por leitura), `findConversation`,
+  `useRunAction`/`useOnOpen` (o `web` não tem camada de teste de
+  componente: entra `jsdom` + `@testing-library/react`), e2e de arrastar
+  card no kanban e do macro-picker.
+- **P3 — Fora desta rodada (por decisão)**: audio-player e voice-recorder
+  (testados à mão no staging; voice precisa de mídia falsa no Chromium e
+  seria flaky) e o design-system (Card/Tag/Select/RingChart sem teste de
+  render; será repassado com o Claude Design — a revisão visual do
+  `/design-system` e do kanban espera esse repasse). Também sem e2e: menu
+  "▾" da mensagem e o sucesso de reagir/editar/excluir contra um provider
+  real.
+- **P3 — Avisos do `pnpm audit --prod`** (3, transitivos de ferramentas de
+  dev): `esbuild` via `drizzle-kit`/`vite` (moderate + low) e `braces` via
+  `eslint-config-next` (high, sem versão corrigida segundo o auditor). Plano:
+  `overrides` em `pnpm-workspace.yaml` para o `esbuild`; `braces` só
+  documentado se não houver correção.
+
 ## Concluído
 
 Movido para `docs/changelog.md` (AUD-024) — o histórico de entregas vive
