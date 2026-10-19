@@ -16,6 +16,30 @@ import { startOutboundConversationInput } from "./schemas";
 
 export type StartOutboundResult = { conversation: ConversationRow; created: boolean };
 
+function assertOutboundConnection(connection: { kind: string; name: string; status: string }) {
+  if (connection.kind !== "waha") {
+    throw new DomainError(
+      "OUTBOUND_CHANNEL_UNSUPPORTED",
+      `Outbound-first is only supported on WhatsApp (waha) connections, not "${connection.kind}"`,
+    );
+  }
+  if (connection.status !== "connected") {
+    throw new DomainError(
+      "CONNECTION_NOT_CONNECTED",
+      `Connection "${connection.name}" is not connected (status: ${connection.status})`,
+    );
+  }
+}
+
+function assertReachableContact(contact: { channelUserId: string }) {
+  if (!isWhatsAppChatId(contact.channelUserId)) {
+    throw new DomainError(
+      "CONTACT_NOT_REACHABLE",
+      "This contact has no WhatsApp identity (channelUserId is not a chat id)",
+    );
+  }
+}
+
 /**
  * Requires messaging:write. v1 is WhatsApp-only: the connection must be a
  * `waha` connection in `connected` status (Meta Cloud needs templates/24h
@@ -36,26 +60,10 @@ export async function startOutboundConversation(
   return withTenant(db, ctx.organizationId, async (tx) => {
     const connection = await findConnectionById(tx, parsed.channelConnectionId);
     if (!connection) throw new NotFoundError("Channel connection", parsed.channelConnectionId);
-    if (connection.kind !== "waha") {
-      throw new DomainError(
-        "OUTBOUND_CHANNEL_UNSUPPORTED",
-        `Outbound-first is only supported on WhatsApp (waha) connections, not "${connection.kind}"`,
-      );
-    }
-    if (connection.status !== "connected") {
-      throw new DomainError(
-        "CONNECTION_NOT_CONNECTED",
-        `Connection "${connection.name}" is not connected (status: ${connection.status})`,
-      );
-    }
+    assertOutboundConnection(connection);
     const contact = await findContactForTicket(tx, parsed.contactId);
     if (!contact) throw new NotFoundError("Contact", parsed.contactId);
-    if (!isWhatsAppChatId(contact.channelUserId)) {
-      throw new DomainError(
-        "CONTACT_NOT_REACHABLE",
-        "This contact has no WhatsApp identity (channelUserId is not a chat id)",
-      );
-    }
+    assertReachableContact(contact);
     const { conversation, created } = await findOrCreateTicket(tx, {
       organizationId: ctx.organizationId,
       channelConnectionId: connection.id,

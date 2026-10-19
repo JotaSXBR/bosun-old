@@ -71,22 +71,24 @@ type CanonFilter = {
   limit: number;
 };
 
+function explicitScopeConditions(filter: CanonFilter, scope: string): SQL[] {
+  const conditions: SQL[] = [eq(memoryEntries.scope, scope)];
+  if (scope === "team" && filter.teamId) {
+    conditions.push(eq(memoryEntries.teamId, filter.teamId));
+  }
+  if (scope === "contact" && filter.contactId) {
+    conditions.push(eq(memoryEntries.contactId, filter.contactId));
+  }
+  return conditions;
+}
+
 /**
  * Scope narrowing — an explicit `scope` filters to that scope (optionally a
  * specific team/contact); otherwise a teamId/contactId context widens the
  * reader to org-wide entries plus rows scoped to that team/contact.
  */
 function scopeConditions(filter: CanonFilter): SQL[] {
-  if (filter.scope) {
-    const conditions: SQL[] = [eq(memoryEntries.scope, filter.scope)];
-    if (filter.scope === "team" && filter.teamId) {
-      conditions.push(eq(memoryEntries.teamId, filter.teamId));
-    }
-    if (filter.scope === "contact" && filter.contactId) {
-      conditions.push(eq(memoryEntries.contactId, filter.contactId));
-    }
-    return conditions;
-  }
+  if (filter.scope) return explicitScopeConditions(filter, filter.scope);
   if (!filter.teamId && !filter.contactId) return [];
   const scoped: SQL[] = [eq(memoryEntries.scope, "org")];
   if (filter.teamId) {

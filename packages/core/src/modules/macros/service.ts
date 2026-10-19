@@ -174,6 +174,23 @@ async function applyMacroProposal(
   }
 }
 
+/** The macro proposal to review; null when it already has the wanted outcome (idempotent). */
+async function findReviewableMacroSuggestion(
+  tx: DbExecutor,
+  organizationId: string,
+  { suggestionId, done }: { suggestionId: string; done: "approved" | "rejected" },
+) {
+  const suggestion = await findSuggestionById(tx, organizationId, suggestionId);
+  if (suggestion?.targetType !== "macro") {
+    throw new NotFoundError("AgentSuggestion", suggestionId);
+  }
+  if (suggestion.status === done) return null;
+  if (suggestion.status !== "pending") {
+    throw new DomainError("SUGGESTION_ALREADY_REVIEWED", suggestion.status);
+  }
+  return suggestion;
+}
+
 /**
  * Requires ai:manage (owner/admin/manager). Approves a pending macro
  * proposal and materializes the macro in the same transaction.
@@ -187,14 +204,11 @@ export async function approveMacroSuggestion(
 ): Promise<void> {
   assertPermission(ctx, { ai: ["manage"] });
   await withTenant(db, ctx.organizationId, async (tx) => {
-    const suggestion = await findSuggestionById(tx, ctx.organizationId, suggestionId);
-    if (suggestion?.targetType !== "macro") {
-      throw new NotFoundError("AgentSuggestion", suggestionId);
-    }
-    if (suggestion.status === "approved") return;
-    if (suggestion.status !== "pending") {
-      throw new DomainError("SUGGESTION_ALREADY_REVIEWED", suggestion.status);
-    }
+    const suggestion = await findReviewableMacroSuggestion(tx, ctx.organizationId, {
+      suggestionId,
+      done: "approved",
+    });
+    if (!suggestion) return;
     if (suggestion.proposedBy === ctx.userId && ctx.role !== "owner" && !ctx.isPlatformAdmin) {
       throw new DomainError("SUGGESTION_SELF_APPROVE", "proposer cannot self-approve");
     }
@@ -220,14 +234,11 @@ export async function rejectMacroSuggestion(
 ): Promise<void> {
   assertPermission(ctx, { ai: ["manage"] });
   await withTenant(db, ctx.organizationId, async (tx) => {
-    const suggestion = await findSuggestionById(tx, ctx.organizationId, suggestionId);
-    if (suggestion?.targetType !== "macro") {
-      throw new NotFoundError("AgentSuggestion", suggestionId);
-    }
-    if (suggestion.status === "rejected") return;
-    if (suggestion.status !== "pending") {
-      throw new DomainError("SUGGESTION_ALREADY_REVIEWED", suggestion.status);
-    }
+    const suggestion = await findReviewableMacroSuggestion(tx, ctx.organizationId, {
+      suggestionId,
+      done: "rejected",
+    });
+    if (!suggestion) return;
     await markSuggestionReviewed(tx, suggestionId, {
       status: "rejected",
       reviewedBy: ctx.userId,

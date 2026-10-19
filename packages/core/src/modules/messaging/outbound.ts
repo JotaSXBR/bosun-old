@@ -1,35 +1,21 @@
 // Outbound actions — agent replies through the channel provider and private
 // internal notes. Ticket guards live in ./actions (module-internal exports).
-import type { ChannelProvider, OutboundMessage, SendMessageResult } from "@crm/channels";
+import type { ChannelProvider, SendMessageResult } from "@crm/channels";
 import { providerForConnection } from "@crm/core/integrations";
 import type { Database } from "@crm/db";
 import { emitDomainEvent, withTenant } from "@crm/db";
 import { captureException } from "@crm/observability";
 
-import { DomainError, NotFoundError } from "../../errors";
+import { DomainError } from "../../errors";
 import type { TenantContext } from "../../tenant/context";
 import { assertPermission } from "../../tenant/context";
-import { assertTicketOwner, loadActiveTicket, patchTicket } from "./actions";
+import { assertTicketOwner, loadActiveTicket } from "./actions";
+import type { ConversationRow, OutboundContent } from "./outbound-shared";
+import { recordAgentReply } from "./outbound-shared";
 import type { MessageRow } from "./repository";
-import {
-  insertMessage,
-  messagePreviewText,
-  updateConversationLastMessage,
-  upsertConversationRead,
-} from "./repository";
-import { getMessage, markMessageSent } from "./repository-messages";
-import type {
-  InternalNoteInput,
-  MessageActionInput,
-  SendChannelInput,
-  SendOutboundInput,
-} from "./schemas";
-import {
-  internalNoteInput,
-  messageActionInput,
-  sendChannelInput,
-  sendOutboundInput,
-} from "./schemas";
+import { insertMessage } from "./repository";
+import type { InternalNoteInput, SendChannelInput, SendOutboundInput } from "./schemas";
+import { internalNoteInput, sendChannelInput, sendOutboundInput } from "./schemas";
 
 /**
  * Anti-ban envelope for AUTOMATED sends (off-hours reply, draft approval —
@@ -82,60 +68,51 @@ export async function sendOutboundMessage(
   });
 }
 
-/**
- * Requires messaging:write. Sends a channel message (text or media already
- * uploaded to storage — `content.url` is the signed GET the provider
- * fetches) through the provider, then persists it. `replyToId` quotes a
- * message on the remote side.
- */
-export async function sendChannelMessage(
+type SendDeps = { provider?: ChannelProvider; automated?: boolean };
+
+function toOutboundContent(input: ReturnType<typeof sendChannelInput.parse>["content"]) {
+  if (input.type === "text") return input;
+  return {
+    type: "media" as const,
+    mediaKind: input.mediaKind,
+    source: { type: "url" as const, url: input.url },
+    ...(input.mimeType ? { mimeType: input.mimeType } : {}),
+    ...(input.caption ? { caption: input.caption } : {}),
+    ...(input.filename ? { filename: input.filename } : {}),
+    ...(input.voiceNote ? { voiceNote: true } : {}),
+    ...(input.storageKey ? { storageKey: input.storageKey } : {}),
+  };
+}
+
+/** Sends through the provider; a failure keeps a `failed` row as audit trail and throws SEND_FAILED. */
+async function sendOrRecordFailure(
   db: Database,
   ctx: TenantContext,
   {
-    input,
-    deps,
-  }: { input: SendChannelInput; deps?: { provider?: ChannelProvider; automated?: boolean } },
-): Promise<MessageRow> {
-  assertPermission(ctx, { messaging: ["write"] });
-  const parsed = sendChannelInput.parse(input);
-  const conversation = await withTenant(db, ctx.organizationId, (tx) =>
-    loadActiveTicket(tx, parsed.conversationId),
-  );
-  assertTicketOwner(conversation, ctx);
-  const provider =
-    deps?.provider ??
-    (await providerForConnection(db, ctx.organizationId, conversation.channelConnectionId));
-
-  const content =
-    parsed.content.type === "text"
-      ? parsed.content
-      : {
-          type: "media" as const,
-          mediaKind: parsed.content.mediaKind,
-          source: { type: "url" as const, url: parsed.content.url },
-          ...(parsed.content.mimeType ? { mimeType: parsed.content.mimeType } : {}),
-          ...(parsed.content.caption ? { caption: parsed.content.caption } : {}),
-          ...(parsed.content.filename ? { filename: parsed.content.filename } : {}),
-          ...(parsed.content.voiceNote ? { voiceNote: true } : {}),
-          ...(parsed.content.storageKey ? { storageKey: parsed.content.storageKey } : {}),
-        };
-  let externalId: string;
-  let status: string;
+    provider,
+    conversation,
+    content,
+    options,
+  }: {
+    provider: ChannelProvider;
+    conversation: ConversationRow;
+    content: ReturnType<typeof toOutboundContent>;
+    options: { replyToId?: string; automated?: boolean };
+  },
+): Promise<SendMessageResult> {
   try {
     // Automated sends (off-hours, draft approval) get the anti-ban envelope:
     // seen → typing ∝ length → paused → send. Human sends stay bare — the
     // human's blue tick is the read signal fired by markConversationRead,
     // never a side effect of replying (spec: seen = read, not reply).
-    const sent =
-      deps?.automated && content.type === "text"
-        ? await sendWithEnvelope(provider, conversation.externalId, content.text)
-        : await provider.sendMessage({
-            to: conversation.externalId,
-            content,
-            ...(parsed.replyToId ? { replyToId: parsed.replyToId } : {}),
-          });
-    externalId = sent.externalId;
-    status = sent.status;
+    if (options.automated && content.type === "text") {
+      return await sendWithEnvelope(provider, conversation.externalId, content.text);
+    }
+    return await provider.sendMessage({
+      to: conversation.externalId,
+      content,
+      ...(options.replyToId ? { replyToId: options.replyToId } : {}),
+    });
   } catch (cause) {
     await withTenant(db, ctx.organizationId, (tx) =>
       insertMessage(tx, {
@@ -156,7 +133,17 @@ export async function sendChannelMessage(
       `Provider failed to send the message: ${(cause as Error).message}`,
     );
   }
+}
 
+async function persistSentMessage(
+  db: Database,
+  ctx: TenantContext,
+  {
+    conversation,
+    content,
+    sent,
+  }: { conversation: ConversationRow; content: OutboundContent; sent: SendMessageResult },
+): Promise<MessageRow> {
   const now = new Date();
   return withTenant(db, ctx.organizationId, async (tx) => {
     // The ticket may have been resolved while the provider call was in
@@ -169,33 +156,13 @@ export async function sendChannelMessage(
       contactId: conversation.contactId,
       direction: "outbound",
       content,
-      externalId,
-      status,
+      externalId: sent.externalId,
+      status: sent.status,
       sentAt: now,
       authorId: ctx.userId,
     });
     if (!message) throw new Error("outbound message insert raced");
-    await updateConversationLastMessage(tx, conversation.id, {
-      lastMessageAt: now,
-      lastMessage: {
-        direction: "outbound",
-        preview: messagePreviewText(content),
-      },
-    });
-    await patchTicket(tx, ctx.organizationId, {
-      conversationId: conversation.id,
-      patch: {
-        status: "waiting_customer",
-        assigneeId: current.assigneeId ?? ctx.userId,
-        firstResponseAt: current.firstResponseAt ?? now,
-      },
-    });
-    // Sending implies the author saw the thread — bump their read cursor.
-    await upsertConversationRead(tx, {
-      organizationId: ctx.organizationId,
-      conversationId: conversation.id,
-      userId: ctx.userId,
-    });
+    await recordAgentReply(tx, ctx, { conversation, current, content, now });
     await emitDomainEvent(tx, {
       type: "message.sent",
       organizationId: ctx.organizationId,
@@ -209,105 +176,31 @@ export async function sendChannelMessage(
 }
 
 /**
- * Requires messaging:write. Resends a `failed` outbound message through the
- * same row — the bubble flips to sent, no duplicate appears. Media resends
- * need `deps.signUrl`: the persisted storage key yields a fresh signed GET
- * (the original `source.url` expires after the send TTL).
+ * Requires messaging:write. Sends a channel message (text or media already
+ * uploaded to storage — `content.url` is the signed GET the provider
+ * fetches) through the provider, then persists it. `replyToId` quotes a
+ * message on the remote side.
  */
-export async function resendFailedMessage(
+export { resendFailedMessage } from "./outbound-resend";
+
+export async function sendChannelMessage(
   db: Database,
   ctx: TenantContext,
-  {
-    input,
-    deps,
-  }: {
-    input: MessageActionInput;
-    deps?: { provider?: ChannelProvider; signUrl?: (storageKey: string) => Promise<string> };
-  },
+  { input, deps }: { input: SendChannelInput; deps?: SendDeps },
 ): Promise<MessageRow> {
   assertPermission(ctx, { messaging: ["write"] });
-  const parsed = messageActionInput.parse(input);
-  const { conversation, message } = await withTenant(db, ctx.organizationId, async (tx) => {
-    const conv = await loadActiveTicket(tx, parsed.conversationId);
-    assertTicketOwner(conv, ctx);
-    const msg = await getMessage(tx, parsed.messageId);
-    if (msg?.conversationId !== conv.id) {
-      throw new NotFoundError("Message", parsed.messageId);
-    }
-    if (msg.direction !== "outbound" || msg.status !== "failed" || msg.private) {
-      throw new DomainError(
-        "MESSAGE_NOT_RESENDABLE",
-        "Only failed outbound messages can be resent.",
-      );
-    }
-    return { conversation: conv, message: msg };
-  });
+  const parsed = sendChannelInput.parse(input);
+  const conversation = await withTenant(db, ctx.organizationId, (tx) =>
+    loadActiveTicket(tx, parsed.conversationId),
+  );
+  assertTicketOwner(conversation, ctx);
   const provider =
     deps?.provider ??
     (await providerForConnection(db, ctx.organizationId, conversation.channelConnectionId));
-
-  const stored = message.content as OutboundMessage["content"];
-  let content: OutboundMessage["content"] = stored;
-  if (stored.type === "media") {
-    if (!stored.storageKey || !deps?.signUrl) {
-      throw new DomainError(
-        "MESSAGE_NOT_RESENDABLE",
-        "Media resend requires the stored upload (storageKey).",
-      );
-    }
-    content = {
-      ...stored,
-      source: { type: "url", url: await deps.signUrl(stored.storageKey) },
-    };
-  }
-
-  let sent: SendMessageResult;
-  try {
-    sent = await provider.sendMessage({ to: conversation.externalId, content });
-  } catch (cause) {
-    throw new DomainError(
-      "SEND_FAILED",
-      `Provider failed to resend the message: ${(cause as Error).message}`,
-    );
-  }
-
-  const now = new Date();
-  return withTenant(db, ctx.organizationId, async (tx) => {
-    const current = await loadActiveTicket(tx, conversation.id);
-    const updated = await markMessageSent(tx, message.id, {
-      externalId: sent.externalId,
-      status: sent.status,
-      sentAt: now,
-    });
-    if (!updated) throw new Error("resend status raced — message no longer failed");
-    await updateConversationLastMessage(tx, conversation.id, {
-      lastMessageAt: now,
-      lastMessage: {
-        direction: "outbound",
-        preview: messagePreviewText(content),
-      },
-    });
-    await patchTicket(tx, ctx.organizationId, {
-      conversationId: conversation.id,
-      patch: {
-        status: "waiting_customer",
-        assigneeId: current.assigneeId ?? ctx.userId,
-        firstResponseAt: current.firstResponseAt ?? now,
-      },
-    });
-    await upsertConversationRead(tx, {
-      organizationId: ctx.organizationId,
-      conversationId: conversation.id,
-      userId: ctx.userId,
-    });
-    await emitDomainEvent(tx, {
-      type: "message.updated",
-      organizationId: ctx.organizationId,
-      conversationId: conversation.id,
-      messageId: updated.id,
-    });
-    return updated;
-  });
+  const content = toOutboundContent(parsed.content);
+  const options = { replyToId: parsed.replyToId, automated: deps?.automated };
+  const sent = await sendOrRecordFailure(db, ctx, { provider, conversation, content, options });
+  return persistSentMessage(db, ctx, { conversation, content, sent });
 }
 
 /**

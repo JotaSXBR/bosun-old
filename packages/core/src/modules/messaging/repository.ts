@@ -7,16 +7,13 @@ const {
   contacts,
   conversationReads,
   conversations,
-  messages,
   organizationMembers,
-  siteChatSessions,
   teams,
   ticketCounters,
 } = schema;
 
 export type ContactRow = typeof contacts.$inferSelect;
 export type ConversationRow = typeof conversations.$inferSelect;
-export type SiteChatSessionRow = typeof siteChatSessions.$inferSelect;
 export type ChannelConnectionRow = typeof channelConnections.$inferSelect;
 
 // Message-scoped helpers live in repository-messages.ts — re-exported here
@@ -341,69 +338,6 @@ export async function updateConversationState(
   return row;
 }
 
-/**
- * One-line inbox preview for a stored message — mirrors the SQL coalesce
- * the denormalized column replaces: text ?? caption ?? "[type]".
- */
-export function messagePreviewText(content: unknown): string {
-  const c = content as { type?: string; text?: string; caption?: string } | null;
-  return c?.text ?? c?.caption ?? `[${c?.type ?? "unknown"}]`;
-}
-
-/**
- * Bumps the conversation's last-message marker AND its denormalized
- * preview/direction — every caller writes them together so the inbox
- * list never needs a correlated probe into messages. Only non-private
- * message paths call this: internal notes must not leak into the queue
- * preview nor clear the awaiting-reply flag.
- */
-export async function updateConversationLastMessage(
-  executor: DbExecutor,
-  conversationId: string,
-  {
-    lastMessageAt,
-    lastMessage,
-  }: { lastMessageAt: Date; lastMessage: { direction: string; preview: string } },
-): Promise<void> {
-  await executor
-    .update(conversations)
-    .set({
-      lastMessageAt,
-      lastMessagePreview: lastMessage.preview,
-      lastMessageDirection: lastMessage.direction,
-      updatedAt: new Date(),
-    })
-    .where(eq(conversations.id, conversationId));
-}
-
-/**
- * Recomputes the denormalized preview/direction after a rare mutation —
- * edit or revoke of the conversation's latest message. One correlated
- * UPDATE on a path that already pays a provider call; NOT for list reads.
- * Revoked messages keep their content (same semantics as the old subplan).
- */
-export async function refreshConversationLastMessage(
-  executor: DbExecutor,
-  conversationId: string,
-): Promise<void> {
-  await executor.execute(sql`
-    update ${conversations} c
-    set last_message_preview = m.preview,
-        last_message_direction = m.direction,
-        updated_at = now()
-    from (
-      select coalesce(content ->> 'text', content ->> 'caption', '[' || (content ->> 'type') || ']') as preview,
-             direction
-      from ${messages}
-      where conversation_id = ${conversationId}
-        and "private" is not true
-      order by sent_at desc nulls last, created_at desc
-      limit 1
-    ) m
-    where c.id = ${conversationId}
-  `);
-}
-
 /** Latest ticket of a chat regardless of status — the widget's visible thread. */
 export async function findLatestConversationForChat(
   executor: DbExecutor,
@@ -424,53 +358,5 @@ export async function findLatestConversationForChat(
   return row;
 }
 
-/**
- * Service-scope session lookup for the public widget endpoints — the token
- * is the only authentication, so this intentionally bypasses tenant
- * scoping (call inside withServiceAccess).
- */
-export async function findSiteChatSessionByToken(
-  executor: DbExecutor,
-  token: string,
-): Promise<
-  | {
-      session: SiteChatSessionRow;
-      contact: ContactRow;
-      connection: ChannelConnectionRow;
-    }
-  | undefined
-> {
-  const [row] = await executor
-    .select({
-      session: siteChatSessions,
-      contact: contacts,
-      connection: channelConnections,
-    })
-    .from(siteChatSessions)
-    .innerJoin(contacts, eq(siteChatSessions.contactId, contacts.id))
-    .innerJoin(channelConnections, eq(siteChatSessions.channelConnectionId, channelConnections.id))
-    .where(eq(siteChatSessions.token, token))
-    .limit(1);
-  return row;
-}
-
-export async function insertSiteChatSession(
-  executor: DbExecutor,
-  values: {
-    organizationId: string;
-    channelConnectionId: string;
-    contactId: string;
-    token: string;
-  },
-): Promise<SiteChatSessionRow> {
-  const [row] = await executor.insert(siteChatSessions).values(values).returning();
-  if (!row) throw new Error("site_chat_sessions insert returned no row");
-  return row;
-}
-
-export async function touchSiteChatSession(executor: DbExecutor, id: string): Promise<void> {
-  await executor
-    .update(siteChatSessions)
-    .set({ lastSeenAt: new Date() })
-    .where(eq(siteChatSessions.id, id));
-}
+export * from "./repository-last-message";
+export * from "./repository-sitechat";

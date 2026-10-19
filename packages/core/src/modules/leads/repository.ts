@@ -4,7 +4,6 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 const { contacts, conversations, dealLabels, deals, funnelStages, funnels, labels } = schema;
 
-export type FunnelRow = typeof funnels.$inferSelect;
 export type StageRow = typeof funnelStages.$inferSelect;
 export type DealRow = typeof deals.$inferSelect;
 export type LabelRow = typeof labels.$inferSelect;
@@ -15,58 +14,7 @@ export type DealCardRow = DealRow & {
   labels: LabelRow[];
 };
 
-// ---------- funnels ----------
-
-export async function listFunnels(executor: DbExecutor, organizationId: string) {
-  return executor
-    .select()
-    .from(funnels)
-    .where(eq(funnels.organizationId, organizationId))
-    .orderBy(asc(funnels.createdAt));
-}
-
-export async function findFunnelById(
-  executor: DbExecutor,
-  organizationId: string,
-  funnelId: string,
-) {
-  const [row] = await executor
-    .select()
-    .from(funnels)
-    .where(and(eq(funnels.id, funnelId), eq(funnels.organizationId, organizationId)))
-    .limit(1);
-  return row ?? null;
-}
-
-export async function insertFunnel(
-  executor: DbExecutor,
-  values: { organizationId: string; name: string; templateRef?: string | undefined },
-) {
-  const [row] = await executor.insert(funnels).values(values).returning();
-  if (!row) throw new Error("funnels insert returned no row");
-  return row;
-}
-
-export async function updateFunnel(
-  executor: DbExecutor,
-  funnelId: string,
-  values: { name: string },
-) {
-  const [row] = await executor
-    .update(funnels)
-    .set({ ...values, updatedAt: new Date() })
-    .where(eq(funnels.id, funnelId))
-    .returning();
-  return row;
-}
-
-export async function deleteFunnel(executor: DbExecutor, funnelId: string) {
-  const rows = await executor
-    .delete(funnels)
-    .where(eq(funnels.id, funnelId))
-    .returning({ id: funnels.id });
-  return rows.length > 0;
-}
+export * from "./repository-funnels";
 
 // ---------- stages ----------
 

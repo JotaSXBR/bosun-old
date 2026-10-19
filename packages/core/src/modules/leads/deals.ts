@@ -1,4 +1,4 @@
-import type { Database } from "@crm/db";
+import type { Database, DbExecutor } from "@crm/db";
 import { withTenant } from "@crm/db";
 
 import { DomainError, NotFoundError } from "../../errors";
@@ -140,25 +140,31 @@ export async function moveDeal(
     if (stage?.funnelId !== deal.funnelId) {
       throw new NotFoundError("Stage", parsed.stageId);
     }
-    const sourceStageId = deal.stageId;
-    const targetIds = (await repo.listDealIdsInStage(tx, parsed.stageId)).filter(
-      (id) => id !== deal.id,
-    );
-    const position = Math.min(parsed.position, targetIds.length);
-    targetIds.splice(position, 0, deal.id);
-    await repo.updateDeal(tx, deal.id, { stageId: parsed.stageId, position });
-    for (const [index, dealId] of targetIds.entries()) {
-      if (dealId !== deal.id) await repo.setDealPosition(tx, dealId, index);
-    }
-    if (sourceStageId !== parsed.stageId) {
-      const remaining = await repo.listDealIdsInStage(tx, sourceStageId);
-      for (const [index, dealId] of remaining.entries()) {
-        await repo.setDealPosition(tx, dealId, index);
-      }
-    }
+    await placeInStage(tx, deal, parsed);
+    if (deal.stageId !== parsed.stageId) await renumberStage(tx, deal.stageId);
     const updated = await repo.findDealById(tx, ctx.organizationId, deal.id);
     return updated ?? deal;
   });
+}
+
+/** Inserts the deal at the clamped position of the target stage and renumbers its siblings. */
+async function placeInStage(tx: DbExecutor, deal: DealRow, target: MoveDealInput): Promise<void> {
+  const targetIds = (await repo.listDealIdsInStage(tx, target.stageId)).filter(
+    (id) => id !== deal.id,
+  );
+  const position = Math.min(target.position, targetIds.length);
+  targetIds.splice(position, 0, deal.id);
+  await repo.updateDeal(tx, deal.id, { stageId: target.stageId, position });
+  for (const [index, dealId] of targetIds.entries()) {
+    if (dealId !== deal.id) await repo.setDealPosition(tx, dealId, index);
+  }
+}
+
+async function renumberStage(tx: DbExecutor, stageId: string): Promise<void> {
+  const remaining = await repo.listDealIdsInStage(tx, stageId);
+  for (const [index, dealId] of remaining.entries()) {
+    await repo.setDealPosition(tx, dealId, index);
+  }
 }
 
 /** Requires leads:manage (destructive). */

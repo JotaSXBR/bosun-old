@@ -1,19 +1,29 @@
 import type { ChannelEvent, ChannelProvider, RawWebhookRequest } from "@crm/channels";
-import {
-  applyConnectionStatus,
-  providerForConnection,
-  resolveWebhookConnection,
-} from "@crm/core/integrations";
+import { providerForConnection, resolveWebhookConnection } from "@crm/core/integrations";
 import type { Database, DbExecutor } from "@crm/db";
-import { emitDomainEvent, schema, withTenant } from "@crm/db";
+import { schema, withTenant } from "@crm/db";
 import { captureException } from "@crm/observability";
 import { eq } from "drizzle-orm";
 
 import { NotFoundError, WebhookVerificationError } from "../../errors";
 import type { TenantContext } from "../../tenant/context";
 import { assertPermission } from "../../tenant/context";
-import { completeStepInTx } from "../onboarding";
 import { getUserPreferences } from "../users";
+import type {
+  ConnectionRef,
+  IngestDeps,
+  IngestedEvent,
+  WebhookIngestResult,
+} from "./ingest-events";
+import {
+  ingestConnectionStatus,
+  ingestContactPresence,
+  ingestMessageEdited,
+  ingestMessageReaction,
+  ingestMessageRevoked,
+  ingestMessageStatus,
+} from "./ingest-events";
+import { ingestMessageReceived } from "./ingest-received";
 import type {
   ContactTicketRow,
   ConversationDetailRow,
@@ -32,21 +42,7 @@ import {
 } from "./reads";
 import type { TransferToMeRow } from "./reads-transfers";
 import { listTransfersTo } from "./reads-transfers";
-import {
-  applyInboundStatusTransition,
-  applyMessageEdit,
-  findActiveTicket,
-  findMessageByExternalIds,
-  findOrCreateTicket,
-  insertMessage,
-  markMessageRevoked,
-  messagePreviewText,
-  updateConversationLastMessage,
-  updateMessageStatus,
-  upsertContact,
-  upsertConversationRead,
-  upsertMessageReaction,
-} from "./repository";
+import { upsertConversationRead } from "./repository";
 import type {
   ContactTicketsInput,
   ConversationIdInput,
@@ -67,342 +63,15 @@ import {
 
 const { conversations } = schema;
 
-/**
- * Minimal connection identity needed for ingestion. The row was already
- * authenticated (unguessable webhook token + provider signature) before any
- * event reaches here.
- */
-export type ConnectionRef = {
-  id: string;
-  organizationId: string;
-  kind: string;
-};
-
-export type IngestedEvent = {
-  eventType: ChannelEvent["type"];
-  /** Set when the event created/updated a message row. */
-  messageId: string | null;
-};
-
-export type WebhookIngestResult = {
-  organizationId: string;
-  channelConnectionId: string;
-  processed: IngestedEvent[];
-};
-
-/**
- * Job enqueue callback injected by the app layer (`@crm/automation` lives
- * above core — dependency direction forbids importing it here). Called with
- * the ingest transaction so the job row commits atomically with the write.
- */
-export type ChannelEventEnqueue = (
-  executor: DbExecutor,
-  payload: {
-    organizationId: string;
-    channelConnectionId: string;
-    eventType: ChannelEvent["type"];
-    conversationId?: string;
-    messageId?: string;
-  },
-) => Promise<unknown>;
-
-/**
- * Avatar-fetch enqueue injected by the app layer (same pattern as
- * ChannelEventEnqueue — automation lives above core).
- */
-export type ContactAvatarEnqueue = (
-  executor: DbExecutor,
-  payload: {
-    organizationId: string;
-    contactId: string;
-    channelConnectionId: string;
-    channelUserId: string;
-  },
-) => Promise<unknown>;
-
-/**
- * Audio-transcription enqueue injected by the app layer (same pattern as
- * enqueueAvatar — automation lives above core).
- */
-export type TranscribeEnqueue = (
-  executor: DbExecutor,
-  payload: {
-    organizationId: string;
-    messageId: string;
-    channelConnectionId: string;
-  },
-) => Promise<unknown>;
-
-export type IngestDeps = {
-  enqueue?: ChannelEventEnqueue;
-  enqueueAvatar?: ContactAvatarEnqueue;
-  enqueueTranscribe?: TranscribeEnqueue;
-};
-
-/** Re-pull a missing contact photo at most weekly (contacts may add one later). */
-const AVATAR_HEAL_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
-
-/**
- * Pure domain ingest — no HTTP. Runs inside the caller's withTenant
- * transaction. `conn` identity always comes from the stored connection row,
- * never from the event payload.
- */
-async function ingestMessageReceived(
-  executor: DbExecutor,
-  conn: ConnectionRef,
-  {
-    event,
-    deps,
-  }: { event: Extract<ChannelEvent, { type: "message.received" }>; deps?: IngestDeps },
-): Promise<IngestedEvent> {
-  const contact = await upsertContact(executor, conn.organizationId, {
-    channelUserId: event.from.channelUserId,
-    displayName: event.from.displayName,
-  });
-  // Avatar heal: enqueue when the contact has no photo and the last
-  // attempt is stale — covers both first-touch and lazy re-pull.
-  const avatarFetchedAt = contact.metadata.avatarFetchedAt;
-  const avatarStale =
-    typeof avatarFetchedAt !== "string" ||
-    Date.now() - Date.parse(avatarFetchedAt) > AVATAR_HEAL_AFTER_MS;
-  if (!contact.avatarUrl && avatarStale) {
-    await deps?.enqueueAvatar?.(executor, {
-      organizationId: conn.organizationId,
-      contactId: contact.id,
-      channelConnectionId: conn.id,
-      channelUserId: contact.channelUserId,
-    });
-  }
-  const { conversation, created } = await findOrCreateTicket(executor, {
-    organizationId: conn.organizationId,
-    channelConnectionId: conn.id,
-    contactId: contact.id,
-    externalId: event.from.channelUserId,
-  });
-  const message = await insertMessage(executor, {
-    organizationId: conn.organizationId,
-    conversationId: conversation.id,
-    channelConnectionId: conn.id,
-    contactId: contact.id,
-    direction: "inbound",
-    content: event.content,
-    externalId: event.externalMessageId,
-    status: "received",
-    sentAt: event.timestamp,
-    // Media event without a fetchable source — the row stays real but the
-    // bubble shows an internal "unsupported file" note, never a broken <img>.
-    ...(event.content.type === "media" &&
-    event.content.source.type === "url" &&
-    !event.content.source.url
-      ? { metadata: { unsupportedMedia: true } }
-      : {}),
-  });
-  await updateConversationLastMessage(executor, conversation.id, {
-    lastMessageAt: event.timestamp,
-    lastMessage: {
-      direction: "inbound",
-      preview: messagePreviewText(event.content),
-    },
-  });
-  // Fan out only for a real insert — webhook replays return no row and must
-  // not re-notify nor re-run the status transition. pg_notify fires on
-  // commit with the write tx; the job row lands in the same tx.
-  if (!message) {
-    if (created) {
-      // Replayed webhook on a resolved chat: the follow-up ticket was
-      // created before the deduped insert — drop the empty ticket so a
-      // replay can't manufacture a phantom ticket.
-      await executor.delete(conversations).where(eq(conversations.id, conversation.id));
-    }
-    return { eventType: event.type, messageId: null };
-  }
-  // Inbound voice/audio → STT job (no-op without an audio-capable BYOK
-  // credential; spec channel-whatsapp.md §5). Atomic with the insert.
-  if (
-    event.content.type === "media" &&
-    event.content.mediaKind === "audio" &&
-    event.content.source.type === "url"
-  ) {
-    await deps?.enqueueTranscribe?.(executor, {
-      organizationId: conn.organizationId,
-      messageId: message.id,
-      channelConnectionId: conn.id,
-    });
-  }
-  const transitioned = await applyInboundStatusTransition(
-    executor,
-    conversation.id,
-    conversation.status,
-  );
-  if (created) {
-    await completeStepInTx(executor, conn.organizationId, "first_conversation");
-    await emitDomainEvent(executor, {
-      type: "conversation.created",
-      organizationId: conn.organizationId,
-      conversationId: conversation.id,
-      contactId: contact.id,
-      ticketNumber: conversation.ticketNumber,
-      precededById: conversation.precededById,
-    });
-  }
-  await emitDomainEvent(executor, {
-    type: "message.received",
-    organizationId: conn.organizationId,
-    conversationId: conversation.id,
-    messageId: message.id,
-    contactId: contact.id,
-    sentAt: event.timestamp.toISOString(),
-  });
-  if (transitioned) {
-    await emitDomainEvent(executor, {
-      type: "conversation.updated",
-      organizationId: conn.organizationId,
-      conversationId: conversation.id,
-      status: transitioned.status,
-    });
-  }
-  await deps?.enqueue?.(executor, {
-    organizationId: conn.organizationId,
-    channelConnectionId: conn.id,
-    eventType: event.type,
-    conversationId: conversation.id,
-    messageId: message.id,
-  });
-  return { eventType: event.type, messageId: message.id };
-}
-
-/** 'me' = reacted on the phone itself; otherwise the contact's jid. */
-async function ingestMessageReaction(
-  executor: DbExecutor,
-  conn: ConnectionRef,
-  event: Extract<ChannelEvent, { type: "message.reaction" }>,
-): Promise<IngestedEvent> {
-  const message = await findMessageByExternalIds(executor, conn.id, [event.messageExternalId]);
-  if (!message) return { eventType: event.type, messageId: null };
-  const reactorKey = event.fromMe
-    ? "me"
-    : (event.actorChannelUserId ?? message.contactId ?? "unknown");
-  await upsertMessageReaction(executor, {
-    organizationId: conn.organizationId,
-    messageId: message.id,
-    reactorKey,
-    emoji: event.emoji,
-    actorChannelUserId: event.actorChannelUserId,
-    fromMe: event.fromMe,
-  });
-  await emitDomainEvent(executor, {
-    type: "message.updated",
-    organizationId: conn.organizationId,
-    conversationId: message.conversationId,
-    messageId: message.id,
-  });
-  return { eventType: event.type, messageId: message.id };
-}
-
-async function ingestMessageEdited(
-  executor: DbExecutor,
-  conn: ConnectionRef,
-  event: Extract<ChannelEvent, { type: "message.edited" }>,
-): Promise<IngestedEvent> {
-  const message = await findMessageByExternalIds(executor, conn.id, event.messageExternalIds);
-  if (!message) return { eventType: event.type, messageId: null };
-  // Skip history when the stored text already matches — the echo of our
-  // own edit (and webhook replays) dedupe here. Media edits carry the new
-  // caption; the shape is preserved (mediaKind/source stay intact).
-  const stored = message.content as { type?: string; text?: string; caption?: string };
-  const storedText = stored.type === "media" ? stored.caption : stored.text;
-  if (storedText === event.newText) {
-    return { eventType: event.type, messageId: message.id };
-  }
-  await applyMessageEdit(executor, {
-    organizationId: conn.organizationId,
-    messageId: message.id,
-    previousContent: message.content,
-    newContent:
-      stored.type === "media"
-        ? { ...(message.content as Record<string, unknown>), caption: event.newText }
-        : { type: "text", text: event.newText },
-  });
-  await emitDomainEvent(executor, {
-    type: "message.updated",
-    organizationId: conn.organizationId,
-    conversationId: message.conversationId,
-    messageId: message.id,
-  });
-  return { eventType: event.type, messageId: message.id };
-}
-
-async function ingestMessageRevoked(
-  executor: DbExecutor,
-  conn: ConnectionRef,
-  event: Extract<ChannelEvent, { type: "message.revoked" }>,
-): Promise<IngestedEvent> {
-  const message = await markMessageRevoked(executor, conn.id, event.messageExternalId);
-  if (!message) return { eventType: event.type, messageId: null };
-  await emitDomainEvent(executor, {
-    type: "message.updated",
-    organizationId: conn.organizationId,
-    conversationId: message.conversationId,
-    messageId: message.id,
-  });
-  return { eventType: event.type, messageId: message.id };
-}
-
-/**
- * Transient presence — resolve the active ticket and emit a notify-only
- * event; the client renders a short-lived "digitando…" without a refresh.
- */
-async function ingestContactPresence(
-  executor: DbExecutor,
-  conn: ConnectionRef,
-  event: Extract<ChannelEvent, { type: "contact.presence" }>,
-): Promise<IngestedEvent> {
-  const conversation = await findActiveTicket(executor, conn.id, event.chatId);
-  if (!conversation) return { eventType: event.type, messageId: null };
-  await emitDomainEvent(executor, {
-    type: "contact.presence",
-    organizationId: conn.organizationId,
-    conversationId: conversation.id,
-    presence: event.presence,
-    participant: event.participant,
-  });
-  return { eventType: event.type, messageId: null };
-}
-
-async function ingestMessageStatus(
-  executor: DbExecutor,
-  conn: ConnectionRef,
-  { event, deps }: { event: Extract<ChannelEvent, { type: "message.status" }>; deps?: IngestDeps },
-): Promise<IngestedEvent> {
-  const message = await updateMessageStatus(executor, conn.id, {
-    externalId: event.externalMessageId,
-    status: event.status,
-  });
-  await deps?.enqueue?.(executor, {
-    organizationId: conn.organizationId,
-    channelConnectionId: conn.id,
-    eventType: event.type,
-    ...(message ? { messageId: message.id } : {}),
-  });
-  return { eventType: event.type, messageId: message?.id ?? null };
-}
-
-async function ingestConnectionStatus(
-  executor: DbExecutor,
-  conn: ConnectionRef,
-  {
-    event,
-    deps,
-  }: { event: Extract<ChannelEvent, { type: "connection.status" }>; deps?: IngestDeps },
-): Promise<IngestedEvent> {
-  await applyConnectionStatus(executor, conn.id, event.status);
-  await deps?.enqueue?.(executor, {
-    organizationId: conn.organizationId,
-    channelConnectionId: conn.id,
-    eventType: event.type,
-  });
-  return { eventType: event.type, messageId: null };
-}
+export type {
+  ChannelEventEnqueue,
+  ConnectionRef,
+  ContactAvatarEnqueue,
+  IngestDeps,
+  IngestedEvent,
+  TranscribeEnqueue,
+  WebhookIngestResult,
+} from "./ingest-events";
 
 export async function ingestChannelEvent(
   executor: DbExecutor,

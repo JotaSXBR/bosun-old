@@ -29,6 +29,18 @@ type ReplyPlan =
   | { ok: true; organizationId: string; conv: ConversationRow; text: string; now: Date }
   | { ok: false; reason: string };
 
+function isUnsupportedInbound(
+  message: Awaited<ReturnType<typeof getMessage>>,
+  conv: ConversationRow,
+): boolean {
+  const meta = message?.metadata as { unsupportedMedia?: boolean } | undefined;
+  return (
+    message?.conversationId === conv.id &&
+    message.direction === "inbound" &&
+    meta?.unsupportedMedia === true
+  );
+}
+
 /** Loads conv + settings + the ingested message and applies every gate. */
 async function planReply(
   db: Database,
@@ -47,14 +59,7 @@ async function planReply(
   }
   const template = settings?.unsupportedMediaMessage?.trim();
   if (!template) return { ok: false, reason: "not-configured" };
-  const meta = message?.metadata as { unsupportedMedia?: boolean } | undefined;
-  const flagged =
-    message?.conversationId === conv.id &&
-    message.direction === "inbound" &&
-    meta?.unsupportedMedia === true;
-  if (!flagged) {
-    return { ok: false, reason: "not-unsupported" };
-  }
+  if (!isUnsupportedInbound(message, conv)) return { ok: false, reason: "not-unsupported" };
   return { ok: true, organizationId: opts.organizationId, conv, text: template, now };
 }
 

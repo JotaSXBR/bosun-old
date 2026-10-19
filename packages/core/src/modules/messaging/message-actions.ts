@@ -128,9 +128,6 @@ export async function editMessageContent(
     messageId: parsed.messageId,
   });
   assertEditableMessage(message);
-  if (message.sentAt && Date.now() - message.sentAt.getTime() > MESSAGE_EDIT_WINDOW_MS) {
-    throw new DomainError("EDIT_WINDOW_EXPIRED", "Messages can only be edited ~15min after send");
-  }
   const provider = await resolveProvider(db, ctx, {
     channelConnectionId: message.channelConnectionId,
     deps,
@@ -140,8 +137,15 @@ export async function editMessageContent(
   }
   await provider.editMessage(chatId, message.externalId!, parsed.text);
   // Preserve quotedExternalId — WA edits replace the text only.
-  const stored = message.content as MessageContent;
-  const newContent = { ...stored, text: parsed.text };
+  const newContent = { ...(message.content as MessageContent), text: parsed.text };
+  await recordMessageEdit(db, ctx, { message, newContent });
+}
+
+async function recordMessageEdit(
+  db: Database,
+  ctx: TenantContext,
+  { message, newContent }: { message: MessageRow; newContent: MessageContent },
+): Promise<void> {
   await withTenant(db, ctx.organizationId, async (tx) => {
     await applyMessageEdit(tx, {
       organizationId: ctx.organizationId,
@@ -169,6 +173,9 @@ function assertEditableMessage(message: MessageRow): void {
   }
   if (message.revokedAt) {
     throw new DomainError("MESSAGE_REVOKED", "Deleted messages cannot be edited");
+  }
+  if (message.sentAt && Date.now() - message.sentAt.getTime() > MESSAGE_EDIT_WINDOW_MS) {
+    throw new DomainError("EDIT_WINDOW_EXPIRED", "Messages can only be edited ~15min after send");
   }
 }
 

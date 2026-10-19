@@ -8,7 +8,6 @@ import { DomainError, NotFoundError } from "../../errors";
 import { isUniqueViolation } from "../../lib/pg-error";
 import type { TenantContext } from "../../tenant/context";
 import { assertPermission } from "../../tenant/context";
-import { findOrCreateAgentByKind } from "../agents";
 import { recordAuditEvent } from "../audit";
 import { sendOutboundMessage } from "../messaging";
 import type { AgentSuggestionRow } from "../suggestions";
@@ -224,23 +223,20 @@ export async function reviewNudge(
   return reviewed;
 }
 
-/**
- * Requires messaging:write. Approve = send: the draft body goes out through
- * the normal outbound path (provider call, ticket → waiting_customer), then
- * the suggestion is marked reviewed. Send failure leaves it pending.
- */
-export async function approveDraft(
+type ApprovalDraft = { approved: AgentSuggestionRow } | { body: string; conversationId: string };
+
+/** Reads the draft and refuses anything that is not sendable; an already-approved one short-circuits. */
+async function readDraftForApproval(
   db: Database,
   ctx: TenantContext,
-  { suggestionId, deps }: { suggestionId: string; deps?: { provider?: ChannelProvider } },
-): Promise<AgentSuggestionRow> {
-  assertPermission(ctx, { messaging: ["write"] });
+  suggestionId: string,
+): Promise<ApprovalDraft> {
   const suggestion = assertDraftRow(
     await withTenant(db, ctx.organizationId, (tx) =>
       findSuggestionById(tx, ctx.organizationId, suggestionId),
     ),
   );
-  if (suggestion.status === "approved") return suggestion;
+  if (suggestion.status === "approved") return { approved: suggestion };
   if (suggestion.status !== "pending") {
     throw new DomainError("DRAFT_ALREADY_REVIEWED", suggestion.status);
   }
@@ -249,14 +245,25 @@ export async function approveDraft(
   if (!conversationId) {
     throw new DomainError("DRAFT_NO_CONVERSATION", "draft has no source conversation");
   }
-  // Atomic claim — a concurrent approve that lands after this update gets
-  // zero rows back, so the same draft can never be sent twice.
-  const claimed = await withTenant(db, ctx.organizationId, (tx) =>
-    claimPendingDraft(tx, suggestionId, ctx.userId),
-  );
-  // Another approve may have won the race between our status check and
-  // the claim — return its outcome instead of sending again.
-  if (!claimed) return reviewedDraftState(db, ctx, suggestionId);
+  return { body, conversationId };
+}
+
+/** Sends the claimed draft; a failed send releases the claim so the draft stays pending. */
+async function sendClaimedDraft(
+  db: Database,
+  ctx: TenantContext,
+  {
+    suggestionId,
+    conversationId,
+    body,
+    deps,
+  }: {
+    suggestionId: string;
+    conversationId: string;
+    body: string;
+    deps?: { provider?: ChannelProvider };
+  },
+): Promise<void> {
   try {
     // Sends outside the review tx — provider latency must not hold row
     // locks. `automated` → anti-ban envelope (the body is AI-generated).
@@ -272,12 +279,36 @@ export async function approveDraft(
     );
     throw error;
   }
+}
+
+/**
+ * Requires messaging:write. Approve = send: the draft body goes out through
+ * the normal outbound path (provider call, ticket → waiting_customer), then
+ * the suggestion is marked reviewed. Send failure leaves it pending.
+ */
+export async function approveDraft(
+  db: Database,
+  ctx: TenantContext,
+  { suggestionId, deps }: { suggestionId: string; deps?: { provider?: ChannelProvider } },
+): Promise<AgentSuggestionRow> {
+  assertPermission(ctx, { messaging: ["write"] });
+  const draft = await readDraftForApproval(db, ctx, suggestionId);
+  if ("approved" in draft) return draft.approved;
+  // Atomic claim — a concurrent approve that lands after this update gets
+  // zero rows back, so the same draft can never be sent twice.
+  const claimed = await withTenant(db, ctx.organizationId, (tx) =>
+    claimPendingDraft(tx, suggestionId, ctx.userId),
+  );
+  // Another approve may have won the race between our status check and
+  // the claim — return its outcome instead of sending again.
+  if (!claimed) return reviewedDraftState(db, ctx, suggestionId);
+  await sendClaimedDraft(db, ctx, { suggestionId, ...draft, deps });
   await withTenant(db, ctx.organizationId, (tx) =>
     emitDomainEvent(tx, {
       type: "agent_suggestion.reviewed",
       organizationId: ctx.organizationId,
       suggestionId,
-      conversationId,
+      conversationId: draft.conversationId,
       targetType: DRAFT_TARGET_TYPE,
     }),
   );
@@ -318,47 +349,7 @@ export async function rejectDraft(
   return reviewed;
 }
 
-/**
- * The org's drafter — dedicated `kind='drafter'` agent row, lazily created
- * on first use with a sane default persona; editable afterwards through
- * the regular agents settings UI (`ai:manage`).
- */
-export async function findOrCreateDrafter(db: Database, organizationId: string) {
-  return withTenant(db, organizationId, (tx) =>
-    findOrCreateAgentByKind(tx, organizationId, {
-      kind: "drafter",
-      defaults: {
-        name: "Drafter",
-        specialty: "Sugestões de resposta para revisão humana",
-        status: "active",
-        systemPrompt:
-          "Você escreve rascunhos de resposta no tom da empresa: cordial, direto, " +
-          "sem jargão técnico com o cliente. Trate o cliente por 'você'.",
-        toolsAllowlist: [],
-      },
-    }),
-  );
-}
-
-/**
- * The org's observer — dedicated `kind='observer'` agent row, lazily
- * created on first analysis. Owner-only editable (system agent gate in
- * agents/service.ts); its `systemPrompt`/`modelRef` steer the job.
- */
-export async function findOrCreateObserver(db: Database, organizationId: string) {
-  return withTenant(db, organizationId, (tx) =>
-    findOrCreateAgentByKind(tx, organizationId, {
-      kind: "observer",
-      defaults: {
-        name: "Observer",
-        specialty: "Análise pós-atendimento e aprendizado operacional",
-        status: "active",
-        systemPrompt: "",
-        toolsAllowlist: [],
-      },
-    }),
-  );
-}
+export { findOrCreateDrafter, findOrCreateObserver } from "./system-agents";
 
 /** Validates a composer-side draft request (enqueue boundary). */
 export function parseDraftRequest(input: unknown): z.output<typeof requestDraftInput> {

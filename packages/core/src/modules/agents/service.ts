@@ -75,6 +75,22 @@ export async function createAgent(
   return agent;
 }
 
+async function updateAgentRow(
+  tx: Parameters<typeof repoUpdateAgent>[0],
+  agentId: string,
+  fields: Parameters<typeof repoUpdateAgent>[2],
+): Promise<AgentRow> {
+  let updated: AgentRow | undefined;
+  try {
+    updated = await repoUpdateAgent(tx, agentId, fields);
+  } catch (error) {
+    if (isUniqueViolation(error, "agents_org_name_idx")) nameTaken();
+    throw error;
+  }
+  if (!updated) throw new NotFoundError("Agent", agentId);
+  return updated;
+}
+
 /** Requires ai:manage. */
 export async function updateAgent(
   db: Database,
@@ -88,15 +104,7 @@ export async function updateAgent(
     if (!existing) throw new NotFoundError("Agent", parsed.agentId);
     assertAgentEditable(ctx, existing.kind);
     const { agentId: _, ...fields } = parsed;
-    let updated: AgentRow | undefined;
-    try {
-      updated = await repoUpdateAgent(tx, existing.id, fields);
-    } catch (error) {
-      if (isUniqueViolation(error, "agents_org_name_idx")) nameTaken();
-      throw error;
-    }
-    if (!updated) throw new NotFoundError("Agent", parsed.agentId);
-    return updated;
+    return updateAgentRow(tx, existing.id, fields);
   });
   audit(db, ctx, { action: "agent.updated", id: agent.id });
   return agent;

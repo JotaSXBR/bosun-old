@@ -36,22 +36,30 @@ function mergeDefined<T extends object>(base: T, override: object): T {
 
 type StoredSettings = Partial<Record<PlatformSettingGroup, Record<string, unknown>>>;
 
+/** The row's group and decrypted value; null for unknown groups, wrong key/corruption or invalid shape. */
+function readStoredRow(
+  row: PlatformSettingRow,
+): { group: PlatformSettingGroup; value: Record<string, unknown> } | null {
+  const group = platformSettingGroupSchema.safeParse(row.key);
+  if (!group.success) return null;
+  let decrypted: unknown;
+  try {
+    decrypted = decryptJson(row.valueEncrypted);
+  } catch {
+    return null; // wrong key or corruption — env fallback still applies
+  }
+  const parsed = platformSettingValueSchemas[group.data].safeParse(decrypted);
+  return parsed.success ? { group: group.data, value: parsed.data } : null;
+}
+
 async function readStoredSettings(
   db: Database,
 ): Promise<{ stored: StoredSettings; rows: PlatformSettingRow[] }> {
   const rows = await withServiceAccess(db, (tx) => listPlatformSettingRows(tx));
   const stored: StoredSettings = {};
   for (const row of rows) {
-    const group = platformSettingGroupSchema.safeParse(row.key);
-    if (!group.success) continue;
-    let decrypted: unknown;
-    try {
-      decrypted = decryptJson(row.valueEncrypted);
-    } catch {
-      continue; // wrong key or corruption — env fallback still applies
-    }
-    const parsed = platformSettingValueSchemas[group.data].safeParse(decrypted);
-    if (parsed.success) stored[group.data] = parsed.data;
+    const entry = readStoredRow(row);
+    if (entry) stored[entry.group] = entry.value;
   }
   return { stored, rows };
 }
@@ -189,6 +197,20 @@ export type PlatformSettingSummary = {
   updatedAt: Date | null;
 };
 
+/** Dot-paths of the leaf fields set in a stored group. */
+function dbFieldPaths(obj: Record<string, unknown>, prefix = ""): string[] {
+  const paths: string[] = [];
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) continue;
+    if (value && typeof value === "object") {
+      paths.push(...dbFieldPaths(value as Record<string, unknown>, `${prefix}${key}.`));
+    } else {
+      paths.push(`${prefix}${key}`);
+    }
+  }
+  return paths;
+}
+
 /** Platform-admin-only read view. Secrets are redacted to presence flags. */
 export async function listPlatformSettingSummaries(
   db: Database,
@@ -198,30 +220,16 @@ export async function listPlatformSettingSummaries(
   const { stored, rows } = await readStoredSettings(db);
   const settings = resolveFrom(getServerEnv(), stored);
   const byKey = new Map<string, PlatformSettingRow>(rows.map((r) => [r.key, r]));
-  const summaries: PlatformSettingSummary[] = [];
-  for (const group of platformSettingGroupSchema.options) {
+  return platformSettingGroupSchema.options.map((group) => {
     const row = byKey.get(group);
-    const dbFields: string[] = [];
-    const collect = (obj: Record<string, unknown>, prefix: string) => {
-      for (const [key, value] of Object.entries(obj)) {
-        if (value === undefined) continue;
-        if (value && typeof value === "object") {
-          collect(value as Record<string, unknown>, `${prefix}${key}.`);
-        } else {
-          dbFields.push(`${prefix}${key}`);
-        }
-      }
-    };
-    collect(stored[group] ?? {}, "");
-    summaries.push({
+    return {
       group,
       configured: configuredFor(group, settings, row !== undefined),
       ...redactGroup(group, settings[group]),
-      dbFields,
+      dbFields: dbFieldPaths(stored[group] ?? {}),
       updatedAt: row?.updatedAt ?? null,
-    });
-  }
-  return summaries;
+    };
+  });
 }
 
 function unsetPath(obj: Record<string, unknown>, path: string): void {
@@ -270,6 +278,25 @@ function splitInput(
   return { values, cleared };
 }
 
+/** Field-level merge; the nested `smtp` object merges per field too. */
+function mergeStoredWithInput(
+  existing: Record<string, unknown>,
+  parsed: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = mergeDefined(existing, parsed);
+  const existingSmtp = existing.smtp;
+  const parsedSmtp = parsed.smtp;
+  if (
+    existingSmtp &&
+    typeof existingSmtp === "object" &&
+    parsedSmtp &&
+    typeof parsedSmtp === "object"
+  ) {
+    merged.smtp = mergeDefined(existingSmtp, parsedSmtp);
+  }
+  return merged;
+}
+
 /**
  * Stores one settings group (platform admins only). Field-level merge over
  * the stored row: absent keys preserve the stored value, blank secrets are
@@ -290,18 +317,7 @@ export async function setPlatformSetting(
   const { stored } = await readStoredSettings(db);
   const existing = structuredClone(stored[group] ?? {});
   for (const path of cleared) unsetPath(existing, path);
-  const merged: Record<string, unknown> = mergeDefined(existing, parsed);
-  const existingSmtp = existing.smtp;
-  const parsedSmtp = parsed.smtp;
-  if (
-    existingSmtp &&
-    typeof existingSmtp === "object" &&
-    parsedSmtp &&
-    typeof parsedSmtp === "object"
-  ) {
-    merged.smtp = mergeDefined(existingSmtp, parsedSmtp);
-  }
-  const valueEncrypted = encryptJson(merged);
+  const valueEncrypted = encryptJson(mergeStoredWithInput(existing, parsed));
   await withPlatformScope(db, (tx) =>
     upsertPlatformSettingRow(tx, group, { valueEncrypted, updatedByUserId: ctx.userId }),
   );
