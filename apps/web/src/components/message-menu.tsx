@@ -42,6 +42,12 @@ export function useMessageMenuState(currentText: string) {
 
 export type MenuState = ReturnType<typeof useMessageMenuState>;
 
+/** Callers pass wider objects (menu props); a Server Action must only get the ids. */
+const pickTarget = ({ conversationId, messageId }: TargetProps): TargetProps => ({
+  conversationId,
+  messageId,
+});
+
 /** React / reply / delete callbacks; `close` hides the menu, `afterDelete` runs on success. */
 export function messageHandlers(args: {
   target: TargetProps;
@@ -50,7 +56,8 @@ export function messageHandlers(args: {
   close: () => void;
   afterDelete?: () => void;
 }) {
-  const { target, run, replyTarget, close, afterDelete } = args;
+  const { run, replyTarget, close, afterDelete } = args;
+  const target = pickTarget(args.target);
   return {
     onReact: (emoji: string) => {
       close();
@@ -80,7 +87,8 @@ export function MessageEditor(props: {
   onSaved: () => void;
   onCancel: () => void;
 }) {
-  const { target, menu, pending, run, onSaved, onCancel } = props;
+  const { menu, pending, run, onSaved, onCancel } = props;
+  const target = pickTarget(props.target);
   const tc = useTranslations("common");
   return (
     <MessageEditForm

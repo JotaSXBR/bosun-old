@@ -127,7 +127,7 @@ export async function editMessageContent(
     conversationId: parsed.conversationId,
     messageId: parsed.messageId,
   });
-  assertEditableMessage(message);
+  assertEditableMessage(message, { enforceEditWindow: true });
   const provider = await resolveProvider(db, ctx, {
     channelConnectionId: message.channelConnectionId,
     deps,
@@ -164,7 +164,10 @@ async function recordMessageEdit(
   });
 }
 
-function assertEditableMessage(message: MessageRow): void {
+function assertEditableMessage(
+  message: MessageRow,
+  { enforceEditWindow = false }: { enforceEditWindow?: boolean } = {},
+): void {
   if (message.direction !== "outbound" || message.private || !message.externalId) {
     throw new DomainError("MESSAGE_NOT_EDITABLE", "Only own outbound channel messages can change");
   }
@@ -174,7 +177,12 @@ function assertEditableMessage(message: MessageRow): void {
   if (message.revokedAt) {
     throw new DomainError("MESSAGE_REVOKED", "Deleted messages cannot be edited");
   }
-  if (message.sentAt && Date.now() - message.sentAt.getTime() > MESSAGE_EDIT_WINDOW_MS) {
+  // Only edits are time-boxed (WhatsApp ~15 min); delete-for-everyone has no such limit here.
+  if (
+    enforceEditWindow &&
+    message.sentAt &&
+    Date.now() - message.sentAt.getTime() > MESSAGE_EDIT_WINDOW_MS
+  ) {
     throw new DomainError("EDIT_WINDOW_EXPIRED", "Messages can only be edited ~15min after send");
   }
 }

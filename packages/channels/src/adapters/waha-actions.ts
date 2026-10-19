@@ -43,7 +43,7 @@ function buildMediaPlan(session: string, to: string, content: MediaContent): Sen
       // PTT) — convert:true transcodes the browser's webm source.
       mimetype: isVoice ? "audio/ogg; codecs=opus" : content.mimeType,
       filename: isVoice
-        ? `${(content.filename ?? "voice").replace(/.[^.]+$/, "")}.ogg`
+        ? `${(content.filename ?? "voice").replace(/\.[^.]+$/, "")}.ogg`
         : content.filename,
       url: content.source.url,
     },

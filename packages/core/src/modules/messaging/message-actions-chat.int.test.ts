@@ -120,6 +120,24 @@ describe("deleteMessageContent", () => {
     expect(row!.revokedAt).not.toBeNull();
     expect(row!.content).toMatchObject({ text: "reply" });
   });
+
+  it("still revokes a message sent more than 15 minutes ago — only edits have a window", async () => {
+    const ticket = await newTicket("del-2@c.us", "false_del2@c.us_1");
+    const provider = new FakeChannelProvider();
+    const reply = await sendReply(ticket.id, provider);
+    await withTenant(db, orgA, (tx) =>
+      tx
+        .update(messages)
+        .set({ sentAt: new Date(Date.now() - 20 * 60_000) })
+        .where(eq(messages.id, reply.id)),
+    );
+
+    await deleteMessageContent(db, ctx(orgA, "agent"), {
+      input: { conversationId: ticket.id, messageId: reply.id },
+      deps: { provider },
+    });
+    expect(provider.deletions).toHaveLength(1);
+  });
 });
 
 describe("presence", () => {

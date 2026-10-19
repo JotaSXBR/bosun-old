@@ -212,6 +212,22 @@ describe("WahaChannelProvider — reply and voice notes", () => {
     expect(body.file?.filename).toBe("audio.ogg");
   });
 
+  it("voiceNote without a filename falls back to voice.ogg", async () => {
+    const { fetch: fetchImpl, calls } = mockFetch(() => ({ json: { id: "m3" } }));
+    await provider(fetchImpl).sendMessage({
+      to: "7911@c.us",
+      content: {
+        type: "media",
+        mediaKind: "audio",
+        voiceNote: true,
+        source: { type: "url", url: "https://cdn.example.com/a" },
+        mimeType: "audio/webm;codecs=opus",
+      },
+    });
+    const body = JSON.parse(calls[0]?.init?.body ?? "{}") as { file?: { filename?: string } };
+    expect(body.file?.filename).toBe("voice.ogg");
+  });
+
   it("fetchContactAvatar downloads the CDN url without the api key", async () => {
     const { fetch: fetchImpl, calls } = mockFetch((url) =>
       url.startsWith("https://waha.example.com")

@@ -97,7 +97,7 @@ function PairingCodeForm({ id }: { id: string }) {
         <Input
           shape="rounded"
           value={phone}
-          onChange={(event) => setPhone(event.target.value.replace(/D/g, ""))}
+          onChange={(event) => setPhone(event.target.value.replace(/\D/g, ""))}
           placeholder="5511999998888"
           inputMode="numeric"
           className="max-w-52"
