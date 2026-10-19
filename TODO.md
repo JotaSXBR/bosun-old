@@ -648,6 +648,16 @@ invitation:create`): lista + convites pendentes com **link copiável
   transporte/sessão do MCP local. Regra atual: MCP primeiro, `gh` CLI como
   fallback em operações de pull request após a primeira falha (AGENTS.md).
 
+- **P3 — Testes ainda sem cobertura direta** (depois do PR de 2026-10-19, que fechou `boss.ts`, `findConversation`, `useRunAction`/`useOnOpen`, o arrasto do kanban e o macro-picker): fluxo de proposta de macro por agente sem permissão de escrita (precisa de um segundo membro), `Escape` e setas do macro-picker, menu "▾" da mensagem e o sucesso de reagir/editar/excluir contra um provider real.
+- **P3 — Fora desta rodada (por decisão)**: audio-player e voice-recorder
+  (testados à mão no staging; voice precisa de mídia falsa no Chromium e
+  seria flaky) e o design-system (Card/Tag/Select/RingChart sem teste de
+  render; será repassado com o Claude Design — a revisão visual do
+  `/design-system` e do kanban espera esse repasse). Também sem e2e: menu
+  "▾" da mensagem e o sucesso de reagir/editar/excluir contra um provider
+  real.
+- **P3 — `braces` no `pnpm audit --prod`** (1 high, GHSA-vfj7-8cjw-p6xm, stack-exhaustion DoS em `braces` ≤3.0.3): a última versão publicada é a 3.0.3 e o advisory não tem versão corrigida, então não há override possível. Vem só de `tooling/eslint > eslint-config-next > @next/eslint-plugin-next > fast-glob > micromatch` (lint em dev/CI, nunca no caminho de requisição). **Aceito**; reavaliar quando o `micromatch` ou o `fast-glob` trocarem de dependência, ou o advisory ganhar correção. Os avisos de `esbuild` foram fechados com `overrides` em `pnpm-workspace.yaml` (2026-10-19).
+
 ## Concluído
 
 Movido para `docs/changelog.md` (AUD-024) — o histórico de entregas vive
