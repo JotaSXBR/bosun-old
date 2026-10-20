@@ -8,6 +8,9 @@ planejado · **P2** quando escalar · **P3** backlog de higiene.
 Ordem do produto definida pelo fundador: integrações ✅ → multi-atendimento
 → chat do site → IA (observer) → leads/funil → atividades → settings.
 
+**Prioridade do v1 (revisada 2026-10-20):** ver `docs/intent/bosun-v1.md` —
+vale para o v1 onde divergir da ordem acima.
+
 - **P1 — Multi-atendimento**: `teams`/`team_members` (setores) ✅;
   `conversations` ganha `sector_id`, `assignee_id` e ciclo de status
   `open|in_progress|waiting_customer|resolved` ✅ (`archived` removido);
