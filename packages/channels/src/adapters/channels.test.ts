@@ -138,7 +138,11 @@ describe("WahaChannelProvider", () => {
     expect(msg).toMatchObject({
       type: "message.received",
       externalMessageId: "false_16449842241553@lid_3EB001F893C4BA9DD928D4",
-      from: { channelUserId: "16449842241553@lid", displayName: "Contato Teste" },
+      from: {
+        channelUserId: "5511999888777@c.us",
+        lid: "16449842241553@lid",
+        displayName: "Contato Teste",
+      },
       content: { type: "text", text: "oi" },
     });
     const [media] = provider.parseWebhook(wahaRequest(wahaFixtures.gowsMediaMessage));

@@ -3,7 +3,9 @@ import type { DbExecutor } from "@crm/db";
 import { emitDomainEvent, schema } from "@crm/db";
 import { eq } from "drizzle-orm";
 
+import { findContactByLid, releaseLidAlias } from "../contacts";
 import { completeStepInTx } from "../onboarding";
+import { mergeLidContact } from "./contact-merge";
 import type { ConnectionRef, IngestDeps, IngestedEvent } from "./ingest-events";
 import type { ContactRow, ConversationRow, MessageRow } from "./repository";
 import {
@@ -41,6 +43,24 @@ async function enqueueAvatarHeal(
     contactId: contact.id,
     channelConnectionId: conn.id,
     channelUserId: contact.channelUserId,
+  });
+}
+
+/**
+ * A contact created by this message goes to Google right away, by phone, instead
+ * of waiting for the periodic sweep. Only a fresh insert qualifies (an upsert
+ * conflict bumps `updated_at`), and only a phone identity can be matched there.
+ */
+async function enqueueGoogleOnCreate(
+  executor: DbExecutor,
+  conn: ConnectionRef,
+  { contact, deps }: { contact: ContactRow; deps?: IngestDeps },
+): Promise<void> {
+  const created = contact.createdAt.getTime() === contact.updatedAt.getTime();
+  if (!created || !contact.channelUserId.endsWith("@c.us")) return;
+  await deps?.enqueueGoogleSync?.(executor, {
+    organizationId: conn.organizationId,
+    contactId: contact.id,
   });
 }
 
@@ -166,6 +186,35 @@ async function fanOutReceived(
 }
 
 /**
+ * The contact a message belongs to, identified by phone. A lid sender is
+ * resolved through SenderAlt (`from.lid` set) or through an alias already on a
+ * phone contact; its provisional lid contact, if any, is folded in.
+ */
+async function resolveContact(
+  executor: DbExecutor,
+  conn: ConnectionRef,
+  event: ReceivedEvent,
+): Promise<ContactRow> {
+  const { lid } = event.from;
+  if (lid)
+    await releaseLidAlias(executor, conn.organizationId, { lid, keep: event.from.channelUserId });
+  // A lid sender without SenderAlt this time: its alias may already name a phone contact.
+  const holder =
+    !lid && event.from.channelUserId.endsWith("@lid")
+      ? await findContactByLid(executor, conn.organizationId, event.from.channelUserId)
+      : undefined;
+  const identity = holder?.channelUserId ?? event.from.channelUserId;
+  const contact = await upsertContact(executor, conn.organizationId, {
+    channelUserId: identity,
+    displayName: event.from.displayName,
+    nameOnlyIfNew: true,
+    metadata: lid ? { lid } : undefined,
+  });
+  if (lid) await mergeLidContact(executor, contact, lid);
+  return contact;
+}
+
+/**
  * Pure domain ingest — no HTTP. Runs inside the caller's withTenant
  * transaction. `conn` identity always comes from the stored connection row,
  * never from the event payload.
@@ -175,16 +224,14 @@ export async function ingestMessageReceived(
   conn: ConnectionRef,
   { event, deps }: { event: ReceivedEvent; deps?: IngestDeps },
 ): Promise<IngestedEvent> {
-  const contact = await upsertContact(executor, conn.organizationId, {
-    channelUserId: event.from.channelUserId,
-    displayName: event.from.displayName,
-  });
+  const contact = await resolveContact(executor, conn, event);
   await enqueueAvatarHeal(executor, conn, { contact, deps });
+  await enqueueGoogleOnCreate(executor, conn, { contact, deps });
   const { conversation, created } = await findOrCreateTicket(executor, {
     organizationId: conn.organizationId,
     channelConnectionId: conn.id,
     contactId: contact.id,
-    externalId: event.from.channelUserId,
+    externalId: contact.channelUserId,
   });
   const message = await insertMessage(executor, {
     organizationId: conn.organizationId,

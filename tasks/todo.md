@@ -1,49 +1,69 @@
-# Todo — Dívida de testes e auditoria pós-lint
+# Todo — Identidade do contato por telefone
 
-Plano: `tasks/plan.md`. PR A = tarefa 2 (branch `chore/audit-overrides`);
-PR B = tarefas 1, 3, 4, 5 (branch `test/coverage-debt`). Um commit por tarefa.
+Plano: `tasks/plan.md`. Um commit local por slice, na branch `feat/contact-identity`.
+Sem PR a cada slice.
 
-## Task 1: Registrar a dívida no `TODO.md`
+## 1. Canal: `SenderAlt` vira telefone (S)
 
-- [x] Itens P3 em Produto — backlog: boss.ts / findConversation / useRunAction+useOnOpen / drag do kanban / macro-picker; audio+voice (staging do usuário); design-system (repasse com Claude Design); avisos do audit
-- **Acceptance**: cada item com prioridade e o motivo de estar fora desta rodada
-- **Verify**: `pnpm format:check`
-- **Deps**: nenhuma · **Tamanho**: XS
+- [x] `wahaMessageSchema` expõe `_data.Info.SenderAlt`
+- [x] `wahaToInbound`: de `@lid` com `SenderAlt` válido → `from.channelUserId = <dígitos>@c.us` e `from.lid = <lid>@lid`; sem `SenderAlt` ou formato inválido → mantém o LID
+- [x] Remove o sufixo `:<device>`; só aceita `^[1-9]\d{7,14}@c\.us$` como identidade
 
-## Task 2: Overrides de `esbuild` e decisão sobre `braces` (PR A)
+**Acceptance:** o fixture `waha-webhooks.json` (`5511999888777:53@s.whatsapp.net`) gera `5511999888777@c.us`; `SenderAlt` malformado nunca vira identidade.
+**Verify:** `pnpm --filter @crm/channels test` · `pnpm typecheck`
+**Dependências:** nenhuma
 
-- [x] `pnpm why` confirma as cadeias; `overrides` em `pnpm-workspace.yaml` por faixa para `esbuild`
-- [x] `braces`: confirmar se há versão corrigida; se não, documentar aceite
-- **Acceptance**: `pnpm audit --prod` sem o `esbuild` (e sem `braces` se houver correção); `db:generate` ainda "No schema changes"
-- **Verify**: `pnpm audit --prod` · `pnpm db:generate` · `pnpm verify:full` · CI
-- **Deps**: nenhuma · **Tamanho**: S
+## 2. Contato por telefone na ingestão (M)
 
-## Task 3: Testes unitários baratos
+- [x] `upsertContact` por `channelUserId` (telefone); guarda `metadata.lid`
+- [x] Nome do WhatsApp só em contato **novo** (não sobrescreve)
+- [x] Ticket usa `contact.channelUserId`; presença resolve `chatId` LID pelo alias
 
-- [x] `packages/automation/src/boss.test.ts` (pg-boss mockado): cada valor de `QUEUES` tem um `work()`; 5 crons esperados; handler recebe `job.data`
-- [x] `apps/web/src/server/find-conversation.test.ts`: `NotFoundError` → `null`; outro erro relançado; sucesso devolve a linha
-- **Acceptance**: testes novos passam e viram RED se a tabela/mapeamento for alterado
-- **Verify**: `pnpm --filter @crm/automation test` · `pnpm --filter @crm/web test`
-- **Deps**: nenhuma · **Tamanho**: S
+**Acceptance:** mensagem por LID com `SenderAlt` reaproveita o contato existente do telefone; outbound-first e inbound caem no mesmo ticket; presença por LID chega ao ticket certo.
+**Verify:** `pnpm --filter @crm/core test:integration` (ingest, outbound-first, presença)
+**Dependências:** 1
 
-## Task 4: Camada de teste de hooks no `web`
+## 3. Índice único do alias (S)
 
-- [x] `jsdom` + `@testing-library/react` (versões compatíveis) em `apps/web` devDependencies
-- [x] ambiente jsdom só nos arquivos que precisam (docblock ou projeto), sem afetar os testes node
-- [x] `use-run-action.test.tsx`: `{ok:false}` → `toast.error`, sem `onSuccess`/refresh; `{ok:true}` → toast de sucesso, `onSuccess`, `router.refresh`
-- [x] `use-on-open.test.tsx`: dispara uma vez por transição false→true; não na montagem aberta nem em re-render
-- **Acceptance**: contagem de testes node inalterada; os novos passam; mutação (inverter a condição) vira RED
-- **Verify**: `pnpm --filter @crm/web test` · `pnpm test` (suíte inteira, sem vazamento de `window`)
-- **Deps**: nenhuma · **Tamanho**: M
+- [x] Confirmar a sintaxe do Drizzle (Context7) e registrar em `## Fontes consultadas`
+- [x] Migração `0036`: índice único parcial `(organization_id, (metadata->>'lid'))`
+- [x] `pnpm db:generate` revisado; teste: o mesmo LID não vira dois contatos na mesma org e é livre em outra org
 
-## Task 5: e2e do kanban e do macro-picker
+**Acceptance:** o banco recusa dois contatos com o mesmo LID na org; isolamento entre orgs preservado.
+**Verify:** `pnpm db:migrate` · teste de integração de isolamento
+**Dependências:** 2
 
-- [x] `deals.spec.ts` (ou spec novo): arrastar um card para outra etapa persiste após reload; menu "Mover para" move
-- [x] spec do macro-picker: digitar `/` abre o picker e inserir uma macro preenche o campo
-- **Acceptance**: specs estáveis (3 rodadas verdes seguidas), sem `waitForTimeout`
-- **Verify**: `pnpm --filter @crm/web exec playwright test e2e/<arquivo> --reporter=line`
-- **Deps**: nenhuma · **Tamanho**: M
+## 4. Mesclagem do contato LID no contato do telefone (M)
 
-### Checkpoint: fim
+- [x] Ao chegar `SenderAlt`, se existe contato com `channelUserId = <lid>`, mescla no do telefone numa transação
+- [x] Reaponta conversas (`contact_id` e `external_id`), mensagens, deals, cérebro e site-chat
+- [x] Conflito de ticket ativo (os dois contatos têm ticket aberto na mesma conexão): une as mensagens no ticket do telefone
+- [x] Idempotente; o contato LID some; nome: manual > Google > push name
 
-- [x] `pnpm verify:full` verde nos dois PRs · CI verde · revisar com o humano
+**Acceptance:** nenhuma mensagem ou conversa se perde; rodar duas vezes não muda nada; não mistura dados entre organizações.
+**Verify:** teste de integração (cenário sem conflito, com conflito, e cross-org)
+**Dependências:** 3
+
+## Checkpoint: após 1-4
+
+- [ ] `pnpm verify` verde · `pnpm verify:full` verde
+- [ ] Revisão do fundador antes do passo Google
+
+## 5. Google no contato novo (S)
+
+- [x] Contato criado ou promovido a telefone enfileira `contact-google-sync` (padrão `enqueueAvatar` em `IngestDeps`)
+- [x] Payload: `phoneNumbers: [{ value: "+E164" }]` sem `type`; `names` com uma entrada
+
+**Acceptance:** contato novo aparece no Google pelo número, sem esperar a varredura de 10 min, sem duplicar um contato que já exista no Google.
+**Verify:** `google-contact-sync.int.test.ts` com o cliente fake de People; `pnpm verify:full`
+**Dependências:** 2
+
+## 6. Checkpoint no staging (S)
+
+- [ ] Deploy no staging; mensagem real de um número que chega como LID
+- [ ] Contato nasce com telefone, sem duplicata; aparece no Google
+- [ ] Resposta do atendente é entregue ao chat do telefone (valida a premissa GOWS)
+- [ ] Docs: `contacts-identity.md`, `channel-whatsapp.md` §8, `TODO.md`
+
+**Acceptance:** os quatro itens acima, com o WAHA 2026.9.2 real.
+**Dependências:** 1-5

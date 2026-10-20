@@ -253,6 +253,13 @@
       "when": 1792331975693,
       "tag": "0035_curvy_black_cat",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792513361382,
+      "tag": "0036_ambitious_nightcrawler",
+      "breakpoints": true
     }
   ]
 }

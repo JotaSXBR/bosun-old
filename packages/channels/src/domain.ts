@@ -24,6 +24,8 @@ export type MessageContent =
 
 export type Participant = {
   channelUserId: string;
+  /** Opaque WhatsApp `@lid` id when `channelUserId` was resolved to the phone. */
+  lid?: string;
   displayName?: string;
 };
 
