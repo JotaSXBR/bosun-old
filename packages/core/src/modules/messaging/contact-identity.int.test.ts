@@ -169,3 +169,26 @@ describe("Google push for a new contact", () => {
     expect(calls).toEqual([created?.id]);
   });
 });
+
+describe("lid alias edge cases", () => {
+  it("moves the alias when WhatsApp maps a known lid to another phone", async () => {
+    const lid = "4242@lid";
+    await ingest(received("m_1", { channelUserId: "5511900000001@c.us", lid }));
+    await ingest(received("m_2", { channelUserId: "5511900000002@c.us", lid }));
+    const all = await contactsOf();
+    const holder = all.filter((c) => c.metadata.lid === lid);
+    expect(holder.map((c) => c.channelUserId)).toEqual(["5511900000002@c.us"]);
+    expect(all.some((c) => c.channelUserId === "5511900000001@c.us")).toBe(true);
+  });
+
+  it("routes a lid message without SenderAlt to the contact that owns the alias", async () => {
+    const lid = "5151@lid";
+    await ingest(received("n_1", { channelUserId: "5511900000003@c.us", lid }));
+    await ingest(received("n_2", { channelUserId: lid }));
+    expect((await contactsOf()).some((c) => c.channelUserId === lid)).toBe(false);
+    const ticket = (await ticketsOf()).filter((t) => t.externalId === "5511900000003@c.us");
+    expect(ticket).toHaveLength(1);
+    const msgs = await withTenant(db, orgId, (tx) => tx.select().from(schema.messages));
+    expect(msgs.filter((m) => m.conversationId === ticket[0]!.id)).toHaveLength(2);
+  });
+});

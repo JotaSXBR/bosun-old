@@ -56,17 +56,41 @@ export async function findContactById(
   return row;
 }
 
-/** Contact that carries `lid` as its WhatsApp alias (call inside withTenant). */
+/** Contact of the organization that carries `lid` as its WhatsApp alias (call inside withTenant). */
 export async function findContactByLid(
   executor: DbExecutor,
+  organizationId: string,
   lid: string,
 ): Promise<ContactRow | undefined> {
   const [row] = await executor
     .select()
     .from(contacts)
-    .where(sql`${contacts.metadata}->>'lid' = ${lid}`)
+    .where(
+      and(eq(contacts.organizationId, organizationId), sql`${contacts.metadata}->>'lid' = ${lid}`),
+    )
     .limit(1);
   return row;
+}
+
+/**
+ * WhatsApp re-mapped `lid` to another phone: the previous holder keeps its phone
+ * identity and loses only the alias, so the unique alias index admits the new one.
+ */
+export async function releaseLidAlias(
+  executor: DbExecutor,
+  organizationId: string,
+  { lid, keep }: { lid: string; keep: string },
+): Promise<void> {
+  await executor
+    .update(contacts)
+    .set({ metadata: sql`${contacts.metadata} - 'lid'`, updatedAt: new Date() })
+    .where(
+      and(
+        eq(contacts.organizationId, organizationId),
+        sql`${contacts.metadata}->>'lid' = ${lid}`,
+        sql`${contacts.channelUserId} <> ${keep}`,
+      ),
+    );
 }
 
 const PROFILE_KEYS = [

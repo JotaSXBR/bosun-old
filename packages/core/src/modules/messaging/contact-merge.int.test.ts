@@ -13,6 +13,8 @@ import { ingestChannelEvent } from "./service";
 const {
   channelConnections,
   contactLabels,
+  conversationLabels,
+  conversationReads,
   contacts,
   conversations,
   deals,
@@ -22,6 +24,7 @@ const {
   memoryEntries,
   messages,
   organizations,
+  users,
 } = schema;
 
 const PHONE = "5516997524950@c.us";
@@ -168,5 +171,82 @@ describe("mergeLidContact", () => {
     const [bContact] = await contactsOf(b);
     expect(bContact).toMatchObject({ channelUserId: LID, displayName: "De outra org" });
     expect(await ticketsOf(b)).toHaveLength(1);
+  });
+});
+
+describe("folding two active tickets", () => {
+  it("keeps labels, read cursors and links, and survives duplicate auto-reply markers", async () => {
+    const phone = "5511977776666@c.us";
+    const lid = "31313@lid";
+    await ingest(a, received("f_phone", { channelUserId: phone }));
+    await ingest(a, received("f_lid", { channelUserId: lid }));
+    const tickets = await ticketsOf(a);
+    const twin = tickets.find((t) => t.externalId === phone)!;
+    const lost = tickets.find((t) => t.externalId === lid)!;
+    const suffix = crypto.randomUUID().slice(0, 8);
+
+    await withTenant(db, a.id, async (tx) => {
+      const [user] = await tx
+        .insert(users)
+        .values({ name: "Fold", email: `fold-${suffix}@crm.local` })
+        .returning({ id: users.id });
+      for (const conversationId of [twin.id, lost.id]) {
+        await tx.insert(messages).values({
+          organizationId: a.id,
+          conversationId,
+          channelConnectionId: a.conn.id,
+          direction: "outbound",
+          content: { type: "text", text: "nota" },
+          status: "sent",
+          metadata: { system: "unsupported_media" },
+        });
+      }
+      const [label] = await tx
+        .insert(labels)
+        .values({ organizationId: a.id, name: "Fold" })
+        .returning();
+      await tx
+        .insert(conversationLabels)
+        .values({ organizationId: a.id, conversationId: lost.id, labelId: label!.id });
+      await tx.insert(conversationReads).values([
+        {
+          organizationId: a.id,
+          conversationId: twin.id,
+          userId: user!.id,
+          lastReadAt: new Date("2026-10-01"),
+        },
+        {
+          organizationId: a.id,
+          conversationId: lost.id,
+          userId: user!.id,
+          lastReadAt: new Date("2026-10-10"),
+        },
+      ]);
+      await tx
+        .update(conversations)
+        .set({ precededById: lost.id })
+        .where(eq(conversations.id, twin.id));
+    });
+
+    await ingest(a, received("f_both", { channelUserId: phone, lid }));
+
+    await withTenant(db, a.id, async (tx) => {
+      expect((await tx.select().from(conversationLabels)).map((r) => r.conversationId)).toEqual([
+        twin.id,
+      ]);
+      const reads = await tx.select().from(conversationReads);
+      expect(reads).toHaveLength(1);
+      expect(reads[0]?.lastReadAt.toISOString()).toBe("2026-10-10T00:00:00.000Z");
+      const markers = (await tx.select().from(messages)).filter(
+        (m) =>
+          m.conversationId === twin.id &&
+          (m.metadata as { system?: string }).system === "unsupported_media",
+      );
+      expect(markers).toHaveLength(1);
+      expect(
+        (await tx.select().from(conversations).where(eq(conversations.id, twin.id)))[0]
+          ?.precededById,
+      ).toBeNull();
+    });
   });
 });

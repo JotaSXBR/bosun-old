@@ -183,7 +183,7 @@ export async function ingestContactPresence(
 ): Promise<IngestedEvent> {
   // Presence names the chat by its @lid; tickets are keyed by the phone.
   const byLid = event.chatId.endsWith("@lid")
-    ? await findContactByLid(executor, event.chatId)
+    ? await findContactByLid(executor, conn.organizationId, event.chatId)
     : null;
   const conversation =
     (await findActiveTicket(executor, conn.id, event.chatId)) ??

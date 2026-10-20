@@ -5,6 +5,7 @@ export {
   findContactByLid,
   listPendingGoogleSyncContacts,
   pageContactsForSync,
+  releaseLidAlias,
   summarizeGoogleSync,
   updateContactAvatar,
   updateContactGoogleSync,

@@ -40,3 +40,13 @@ describe("wahaToInbound identity", () => {
     expect(from).toEqual({ channelUserId: "5511999888777@c.us" });
   });
 });
+
+describe("wahaToInbound display name", () => {
+  it("bounds a sender-controlled name", () => {
+    const { from } = wahaToInbound({
+      ...message("5511999888777@c.us"),
+      notifyName: `  ${"x".repeat(500)}  `,
+    });
+    expect(from.displayName).toHaveLength(120);
+  });
+});

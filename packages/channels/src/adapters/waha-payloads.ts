@@ -67,7 +67,8 @@ export function wahaToInbound(
   data: z.infer<typeof wahaMessageSchema>,
   fallbackTimestamp?: number,
 ): InboundChannelMessage {
-  const displayName = data.notifyName ?? data._data?.Info?.PushName ?? undefined;
+  // Sender-controlled text: bounded before it is stored and mirrored to Google.
+  const displayName = (data.notifyName ?? data._data?.Info?.PushName)?.trim().slice(0, 120);
   const phone = phoneOfLidSender(data.from, data._data?.Info?.SenderAlt);
   return {
     externalMessageId: data.id,
