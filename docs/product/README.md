@@ -14,3 +14,4 @@ architecture decisions live in `docs/adr/`.
 - [ia-navegacao.md](ia-navegacao.md) — information architecture: menus, pages, tabs, settings matrix, flows (approved 2026-10-12)
 - [layout-desktop-app.md](layout-desktop-app.md) — desktop 1920/1536 layout and app-format rules (approved 2026-10-12)
 - [roadmap.md](roadmap.md) — skeleton milestone and phases
+- [../intent/bosun-v1.md](../intent/bosun-v1.md) — v1 intent and priority order (2026-10-20); wins over the roadmap for v1
