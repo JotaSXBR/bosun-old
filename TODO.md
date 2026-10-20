@@ -12,7 +12,7 @@ Ordem do produto definida pelo fundador: integrações ✅ → multi-atendimento
 vale para o v1 onde divergir da ordem acima.
 Frente 1 (contatos por telefone, `docs/product/contacts-identity.md`): slices 1–4
 construídos na branch `feat/contact-identity` (canal `SenderAlt`, identidade por
-telefone, índice do alias, mesclagem); falta Google no contato novo e validar
+telefone, índice do alias, mesclagem); Google no contato novo também feito; falta validar
 no staging.
 
 - **P1 — Multi-atendimento**: `teams`/`team_members` (setores) ✅;

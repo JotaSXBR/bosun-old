@@ -148,3 +148,24 @@ describe("lid alias uniqueness", () => {
     }
   });
 });
+
+describe("Google push for a new contact", () => {
+  it("enqueues once for a freshly created phone contact, never for repeats or a lid", async () => {
+    const calls: string[] = [];
+    const deps = {
+      enqueueGoogleSync: (_tx: unknown, p: { contactId: string }) => {
+        calls.push(p.contactId);
+        return Promise.resolve();
+      },
+    };
+    const run = (event: ChannelEvent) =>
+      withTenant(db, orgId, (tx) => ingestChannelEvent(tx, conn, { event, deps }));
+
+    await run(received("g_1", { channelUserId: "5511933334444@c.us", lid: "888@lid" }));
+    await run(received("g_2", { channelUserId: "5511933334444@c.us", lid: "888@lid" }));
+    await run(received("g_3", { channelUserId: "999999@lid" }));
+
+    const created = (await contactsOf()).find((c) => c.channelUserId === "5511933334444@c.us");
+    expect(calls).toEqual([created?.id]);
+  });
+});

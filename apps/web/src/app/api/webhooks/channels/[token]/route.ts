@@ -1,6 +1,7 @@
 import {
   enqueueChannelEventProcessed,
   enqueueContactAvatar,
+  enqueueContactGoogleSync,
   enqueueTranscribeAudio,
 } from "@crm/automation";
 import { NotFoundError, WebhookVerificationError } from "@crm/core";
@@ -46,6 +47,7 @@ export async function POST(
         // Job rows commit atomically with each event's ingest transaction.
         enqueue: (executor, payload) => enqueueChannelEventProcessed(payload, executor),
         enqueueAvatar: (executor, payload) => enqueueContactAvatar(payload, executor),
+        enqueueGoogleSync: (executor, payload) => enqueueContactGoogleSync(payload, executor),
         enqueueTranscribe: (executor, payload) => enqueueTranscribeAudio(payload, executor),
       },
     });

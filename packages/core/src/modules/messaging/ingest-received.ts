@@ -46,6 +46,24 @@ async function enqueueAvatarHeal(
 }
 
 /**
+ * A contact created by this message goes to Google right away, by phone, instead
+ * of waiting for the periodic sweep. Only a fresh insert qualifies (an upsert
+ * conflict bumps `updated_at`), and only a phone identity can be matched there.
+ */
+async function enqueueGoogleOnCreate(
+  executor: DbExecutor,
+  conn: ConnectionRef,
+  { contact, deps }: { contact: ContactRow; deps?: IngestDeps },
+): Promise<void> {
+  const created = contact.createdAt.getTime() === contact.updatedAt.getTime();
+  if (!created || !contact.channelUserId.endsWith("@c.us")) return;
+  await deps?.enqueueGoogleSync?.(executor, {
+    organizationId: conn.organizationId,
+    contactId: contact.id,
+  });
+}
+
+/**
  * Media event without a fetchable source — the row stays real but the
  * bubble shows an internal "unsupported file" note, never a broken <img>.
  */
@@ -184,6 +202,7 @@ export async function ingestMessageReceived(
   });
   if (event.from.lid) await mergeLidContact(executor, contact, event.from.lid);
   await enqueueAvatarHeal(executor, conn, { contact, deps });
+  await enqueueGoogleOnCreate(executor, conn, { contact, deps });
   const { conversation, created } = await findOrCreateTicket(executor, {
     organizationId: conn.organizationId,
     channelConnectionId: conn.id,

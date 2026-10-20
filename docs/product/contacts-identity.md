@@ -1,7 +1,7 @@
 # Contact identity (v1, front 1)
 
 Status: **in progress** (2026-10-20) — channel, identity by phone, alias index and merge built
-(slices 1–4); Google push on new contact and staging validation pending. Plan: `tasks/plan.md`.
+(slices 1–4); Google push on new contact built (slice 5); staging validation pending. Plan: `tasks/plan.md`.
 Context: `docs/intent/bosun-v1.md` (front 1). Builds on
 `channel-whatsapp.md` §8 and `contacts-google-sync.md`.
 

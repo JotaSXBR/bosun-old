@@ -51,8 +51,8 @@ Sem PR a cada slice.
 
 ## 5. Google no contato novo (S)
 
-- [ ] Contato criado ou promovido a telefone enfileira `contact-google-sync` (padrão `enqueueAvatar` em `IngestDeps`)
-- [ ] Payload: `phoneNumbers: [{ value: "+E164" }]` sem `type`; `names` com uma entrada
+- [x] Contato criado ou promovido a telefone enfileira `contact-google-sync` (padrão `enqueueAvatar` em `IngestDeps`)
+- [x] Payload: `phoneNumbers: [{ value: "+E164" }]` sem `type`; `names` com uma entrada
 
 **Acceptance:** contato novo aparece no Google pelo número, sem esperar a varredura de 10 min, sem duplicar um contato que já exista no Google.
 **Verify:** `google-contact-sync.int.test.ts` com o cliente fake de People; `pnpm verify:full`

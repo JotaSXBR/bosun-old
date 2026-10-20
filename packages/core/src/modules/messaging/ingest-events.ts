@@ -79,9 +79,19 @@ export type TranscribeEnqueue = (
   },
 ) => Promise<unknown>;
 
+/**
+ * Google Contacts push for a freshly created contact, injected by the app
+ * layer (same pattern as enqueueAvatar). The job itself re-checks consent.
+ */
+export type ContactGoogleSyncEnqueue = (
+  executor: DbExecutor,
+  payload: { organizationId: string; contactId: string },
+) => Promise<unknown>;
+
 export type IngestDeps = {
   enqueue?: ChannelEventEnqueue;
   enqueueAvatar?: ContactAvatarEnqueue;
+  enqueueGoogleSync?: ContactGoogleSyncEnqueue;
   enqueueTranscribe?: TranscribeEnqueue;
 };
 
