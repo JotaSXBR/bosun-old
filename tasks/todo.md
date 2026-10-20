@@ -5,9 +5,9 @@ Sem PR a cada slice.
 
 ## 1. Canal: `SenderAlt` vira telefone (S)
 
-- [ ] `wahaMessageSchema` expõe `_data.Info.SenderAlt`
-- [ ] `wahaToInbound`: de `@lid` com `SenderAlt` válido → `from.channelUserId = <dígitos>@c.us` e `from.lid = <lid>@lid`; sem `SenderAlt` ou formato inválido → mantém o LID
-- [ ] Remove o sufixo `:<device>`; só aceita `^[1-9]\d{7,14}@c\.us$` como identidade
+- [x] `wahaMessageSchema` expõe `_data.Info.SenderAlt`
+- [x] `wahaToInbound`: de `@lid` com `SenderAlt` válido → `from.channelUserId = <dígitos>@c.us` e `from.lid = <lid>@lid`; sem `SenderAlt` ou formato inválido → mantém o LID
+- [x] Remove o sufixo `:<device>`; só aceita `^[1-9]\d{7,14}@c\.us$` como identidade
 
 **Acceptance:** o fixture `waha-webhooks.json` (`5511999888777:53@s.whatsapp.net`) gera `5511999888777@c.us`; `SenderAlt` malformado nunca vira identidade.
 **Verify:** `pnpm --filter @crm/channels test` · `pnpm typecheck`

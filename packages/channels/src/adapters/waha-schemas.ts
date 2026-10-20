@@ -97,7 +97,10 @@ export const wahaMessageSchema = z.looseObject({
   // _data.Info.PushName (WEBJS uses the top-level notifyName).
   _data: z
     .looseObject({
-      Info: z.looseObject({ PushName: z.string().nullish() }).nullish(),
+      // SenderAlt carries the phone of an @lid sender: "<digits>:<device>@s.whatsapp.net".
+      Info: z
+        .looseObject({ PushName: z.string().nullish(), SenderAlt: z.string().nullish() })
+        .nullish(),
     })
     .nullish(),
 });

@@ -55,15 +55,25 @@ function mapAck(ack: number): "sent" | "delivered" | "read" | "failed" | null {
   }
 }
 
+/** Phone chat id (`<digits>@c.us`) of an `@lid` sender, or null when WAHA gave none. */
+function phoneOfLidSender(from: string, senderAlt: string | null | undefined): string | null {
+  if (!from.endsWith("@lid")) return null;
+  const [user = "", server] = (senderAlt ?? "").split("@");
+  const digits = user.split(":")[0] ?? "";
+  return server === "s.whatsapp.net" && /^[1-9]\d{7,14}$/.test(digits) ? `${digits}@c.us` : null;
+}
+
 export function wahaToInbound(
   data: z.infer<typeof wahaMessageSchema>,
   fallbackTimestamp?: number,
 ): InboundChannelMessage {
   const displayName = data.notifyName ?? data._data?.Info?.PushName ?? undefined;
+  const phone = phoneOfLidSender(data.from, data._data?.Info?.SenderAlt);
   return {
     externalMessageId: data.id,
     from: {
-      channelUserId: data.from,
+      channelUserId: phone ?? data.from,
+      ...(phone ? { lid: data.from } : {}),
       ...(displayName ? { displayName } : {}),
     },
     content: wahaMessageContent(data),
