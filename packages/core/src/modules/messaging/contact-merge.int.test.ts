@@ -250,3 +250,26 @@ describe("folding two active tickets", () => {
     });
   });
 });
+
+describe("concurrent webhooks", () => {
+  it("converges to one contact and one ticket when two messages race on the same lid", async () => {
+    const phone = "5511966665555@c.us";
+    const lid = "62626@lid";
+    const results = await Promise.allSettled([
+      ingest(a, received("r_1", { channelUserId: phone, lid })),
+      ingest(a, received("r_2", { channelUserId: phone, lid })),
+      ingest(a, received("r_3", { channelUserId: lid })),
+    ]);
+    const failed = results.filter((r) => r.status === "rejected");
+    expect(failed.map((r) => String((r as PromiseRejectedResult).reason))).toEqual([]);
+
+    await ingest(a, received("r_4", { channelUserId: phone, lid }));
+    expect((await contactsOf(a)).filter((c) => c.channelUserId === lid)).toHaveLength(0);
+    const tickets = (await ticketsOf(a)).filter((t) => t.externalId === phone);
+    expect(tickets).toHaveLength(1);
+    const ids = (await messagesOf(a))
+      .filter((m) => m.conversationId === tickets[0]!.id)
+      .map((m) => m.externalId);
+    expect(ids.sort()).toEqual(["r_1", "r_2", "r_3", "r_4"]);
+  });
+});
