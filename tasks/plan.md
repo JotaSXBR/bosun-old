@@ -1,91 +1,92 @@
-# Plan — Fechar a dívida de testes e de auditoria pós-lint
+# Plan — Identidade do contato por telefone (v1, frente 1)
 
-- **Origem**: `TODO.md` (a registrar na tarefa 1) · resultado do `/ship` do PR #52 (test-engineer + security-auditor)
-- **Lifecycle**: plan → build → test → review → ship
-- **Data**: 2026-10-19
+- **Origem**: `docs/intent/bosun-v1.md` (frente 1) · `docs/product/contacts-identity.md`
+- **Lifecycle**: spec → plan → build → test → review → ship
+- **Data**: 2026-10-20
 
 ## Objetivo
 
-Os gaps de teste e os 3 avisos de `pnpm audit --prod` deixados pelo PR #52
-ficam registrados, e os que valem o custo são fechados: dependências sem
-aviso evitável e cobertura direta do que a refatoração tocou.
+Uma mensagem que chega de um `@lid` do WhatsApp cria (ou reaproveita) o
+contato pelo **telefone**, sem duplicata vazia, e o contato novo vai para o
+Google Contacts já com o número.
 
 ## Contexto
 
-Decisões do usuário (2026-10-19):
+Decisões do fundador (entrevista de 2026-10-20), não só o quê:
 
-- Ordem: registrar no `TODO.md` → bump de dependências → testes unitários
-  baratos → testes de hooks (pode adicionar `jsdom` e
-  `@testing-library/react` como devDependencies do `web`) → e2e.
-- **Audio e voice ficam de fora** (o usuário testa no staging).
-- **Design-system fora**: o usuário vai repassá-lo com o Claude Design.
-- Dois PRs: (A) só dependências (`overrides`), (B) registro + testes. Push e
-  PR só quando o usuário pedir; ele já autorizou PR e merge no PR #52, e a
-  autorização para estes dois PRs é pedida de novo no fim.
-- Cadeias do audit (`pnpm why`): `braces` vem de
-  `tooling/eslint > eslint-config-next > @next/eslint-plugin-next >
-fast-glob > micromatch` (lint, dev); `esbuild` vem de
-  `better-auth > drizzle-kit > @esbuild-kit/*` e `better-auth > vitest > vite`
-  (ferramentas de dev). Nada no caminho de requisição em produção — o aviso
-  só aparece em `--prod` porque `better-auth` é dependência.
-- `braces` está marcado como "sem versão corrigida" pelo auditor: a tarefa 2
-  confirma isso e, se for verdade, documenta o aceite em vez de forçar versão.
+- **O telefone é a identidade** (`<dígitos>@c.us`); o LID é só alias em
+  `contacts.metadata.lid`. Sem tabela nova (suficiente para v1).
+- O telefone vem do `_data.Info.SenderAlt` do webhook. **Verificado no staging**
+  (WAHA 2026.9.2 GOWS): `SenderAlt = "<dígitos>:<device>@s.whatsapp.net"`; o
+  sufixo `:<device>` é removido. Fixture `waha-webhooks.json` já tem o formato.
+- **Fallback `GET /lids/{lid}` fica fora**: o caso confirmado é coberto por
+  `SenderAlt`. Sem telefone, o contato fica provisório pelo LID e se junta
+  quando a próxima mensagem trouxer `SenderAlt`.
+- **Sem backfill em lote**: só há dados de teste; o contato LID antigo é
+  mesclado quando a pessoa escrever de novo.
+- O nome do WhatsApp só nomeia contato **novo**, nunca sobrescreve (vários
+  atendentes podem escrever do mesmo número). Separar "Nome @ Empresa" e
+  preencher empresa **não** é desta frente: vira sugestão do observer (frente 2).
+- Google: `phoneNumbers: [{ value: "+E164" }]` **sem `type`** (pode ser fixo);
+  `names` é campo único. O mapeador (`toPerson`) já faz isso; contato novo
+  passa a ser enfileirado na criação, não só pela varredura de 10 min.
+- `conversations.external_id` passa a ser o `channelUserId` do contato (telefone):
+  assim o mesmo ticket serve inbound por LID e outbound-first por telefone.
+  Presença (`contact.presence`) chega com `chatId` LID e é resolvida pelo alias.
+- Trabalho em **slices**, um commit local por slice verificado, numa branch
+  `feat/contact-identity`. **Sem PR a cada slice**: o PR só quando o fundador pedir.
 
 ## Fontes consultadas
 
-| Tema                       | Versão / alvo                       | Fonte                                                                     | Data       | O que confirmou                                                                                                                                                                                                                                         |
-| -------------------------- | ----------------------------------- | ------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `overrides` no pnpm        | pnpm 12.8.1 (`packageManager`)      | Context7 `/pnpm/pnpm.io` (settings/dependency-resolution)                 | 2026-10-19 | `overrides` vive em `pnpm-workspace.yaml`, só na raiz; `"pkg@faixa": "versão"` escopa por faixa; `"a>b"` escopa por pai                                                                                                                                 |
-| Ambiente jsdom por arquivo | vitest 5.0.3                        | Context7 `/vitest-dev/vitest/v5.0.3` (config/environment, guide/projects) | 2026-10-19 | `// @vitest-environment jsdom` por arquivo, ou `test.projects` com `environment` por glob. `isolate: false` de `vitest.unit.shared.ts` verificado no build (suíte da raiz estável em 2 rodadas); o runner da raiz precisou incluir `apps/**/*.test.tsx` |
-| `@testing-library/react`   | a confirmar contra o React do `web` | a consultar antes da tarefa 4                                             | —          | versão compatível com a do React e do vitest 5                                                                                                                                                                                                          |
-| Advisories do audit        | `pnpm audit --prod`                 | execução local                                                            | 2026-10-19 | 1 high (`braces`), 1 moderate + 1 low (`esbuild`), todos transitivos de ferramentas de dev                                                                                                                                                              |
+| Tema                          | Versão / alvo           | Fonte                                                          | Data       | O que confirmou                                                                                     |
+| ----------------------------- | ----------------------- | -------------------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------- |
+| WAHA `SenderAlt` / LID        | 2026.9.2 (GOWS)         | Context7 `/devlikeapro/waha-docs` + payload real do staging    | 2026-10-20 | `from` = LID; `_data.Info.SenderAlt` = `<dígitos>:<device>@s.whatsapp.net`; webhook respondeu `200` |
+| People API `createContact`    | v1                      | Context7 `/websites/developers_google_people`                  | 2026-10-20 | `phoneNumbers[].value`; `canonicalForm` só saída; `type` opcional; `names` é singleton (2 → 400)    |
+| Drizzle índice único parcial  | versão do `packages/db` | **UNVERIFIED** — consultar Context7 antes da migração (task 3) | —          | sintaxe de índice sobre expressão `(metadata->>'lid')` com `where`                                  |
+| GOWS: envio para `<tel>@c.us` | 2026.9.2                | **UNVERIFIED** — validar no staging (task 6)                   | —          | resposta ao contato sai para o chat do telefone e é entregue                                        |
 
 ## Escopo
 
-TODO.md
-package.json
-pnpm-workspace.yaml
-pnpm-lock.yaml
-vitest.config.ts
-vitest.unit.shared.ts
-apps/web/package.json
-apps/web/vitest.config.ts
-apps/web/src/**
-apps/web/e2e/**
-packages/automation/src/**
-packages/core/src/**
+packages/channels/src/domain.ts
+packages/channels/src/adapters/waha-schemas.ts
+packages/channels/src/adapters/waha-payloads.ts
+packages/channels/src/adapters/waha-lid.test.ts
+packages/channels/src/adapters/channels.test.ts
+packages/channels/src/adapters/**fixtures**/**
+packages/core/src/modules/messaging/**
+packages/core/src/modules/contacts/**
+packages/core/src/modules/external-connections/**
+packages/db/src/schema/messaging.ts
+packages/db/migrations/**
+apps/web/src/app/api/webhooks/channels/**
 
 ## Fora de escopo
 
-- Audio-player e voice-recorder (staging do usuário).
-- Design-system (repasse com o Claude Design).
-- Mudança de comportamento de produto: se um teste achar bug, corrige-se só
-  se for trivial e isolado; senão vira item no `TODO.md`.
-- Upgrade de major de `eslint-config-next`, `drizzle-kit` ou `vitest` só para
-  limpar aviso.
+- Tool/sugestão do observer para nome e empresa (frente 2).
+- Fallback `GET /lids/{lid}` e job de backfill em lote.
+- UI de contatos e do atendimento (reforma de navegação, frente 4).
+- Pull Google → Bosun (nome/empresa do contato do Google). Pergunta aberta na spec.
+- Endereço/aniversário por opt-in e as pendências de segurança da slice 2 do Google.
+- Entidade "empresa" ligando contatos.
 
 ## Tarefas
 
-Detalhe, acceptance e verify em `tasks/todo.md`.
+Detalhe com acceptance + verify em `tasks/todo.md`. Ordem por dependência:
 
-1. Registrar a dívida no `TODO.md`.
-2. Overrides de `esbuild` (e decisão sobre `braces`) — **PR A**.
-3. Testes unitários: `boss.ts` e `findConversation` — PR B.
-4. Camada de teste de hooks no `web` + `useRunAction`/`useOnOpen` — PR B.
-5. e2e: arrastar card no kanban e macro-picker — PR B.
-
-## Riscos
-
-| Risco                                                                                       | Impacto | Mitigação                                                                              |
-| ------------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------- |
-| Override de `esbuild` quebra `drizzle-kit`/`tsx`/vite (majors diferentes: 0.18, 0.25, 0.27) | Média   | override por faixa, rodar `db:generate`, `verify:full` e CI; reverter se quebrar       |
-| `isolate: false` + jsdom vaza `window` para testes node                                     | Média   | ambiente por arquivo/projeto; rodar a suíte inteira e comparar a contagem antes/depois |
-| Teste de drag no kanban flaky                                                               | Média   | `page.mouse` com passos explícitos e `expect.poll`; sem `waitForTimeout`               |
-| `braces` sem correção                                                                       | Baixa   | documentar aceite (dev-only) no `TODO.md`, sem forçar versão                           |
+1. **Canal**: `SenderAlt` → telefone. Participant carrega `channelUserId` (telefone)
+   e `lid` (alias). Só `packages/channels`.
+2. **Contato por telefone**: `upsertContact` por telefone, guarda `metadata.lid`,
+   nome só em contato novo, ticket usa `contact.channelUserId`, presença via alias.
+3. **Índice único do alias** (migração `0036`) + checagem de duas pessoas com o mesmo LID.
+4. **Mesclagem** do contato LID no contato do telefone (conversas, mensagens,
+   deals, cérebro, site-chat), com conflito de ticket ativo.
+5. **Google no contato novo**: enfileirar a sincronização na criação/promoção.
+6. **Checkpoint no staging**: mensagem real de um LID, contato com telefone,
+   contato no Google, resposta entregue.
 
 ## Critérios de pronto
 
-- [ ] `pnpm verify:full` verde em cada PR; CI verde
-- [ ] `pnpm audit --prod`: só o que for inevitável, com justificativa registrada
-- [ ] Nº de testes sobe; nenhum teste removido, pulado ou enfraquecido
-- [ ] `TODO.md`: itens novos registrados e os fechados movidos para Concluído
+- [ ] `pnpm verify` verde por slice; `pnpm verify:full` no fim (toca DB)
+- [ ] Testes alvo: unit do canal; `*.int.test.ts` de ingest, mesclagem e isolamento entre orgs
+- [ ] Docs atualizadas: `docs/product/contacts-identity.md` (status), `channel-whatsapp.md` §8, `TODO.md`
+- [ ] Validado no staging com o WAHA real
