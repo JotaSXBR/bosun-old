@@ -56,13 +56,24 @@ found; once the identity is `@c.us` the contact becomes eligible. Payload shape
 per People API `people.createContact` (`Person`):
 
 - `phoneNumbers: [{ value: "+<E.164>" }]` — `canonicalForm` is output only;
-  `type` is optional (`mobile` is a predefined value, plan decides whether to
-  set it).
+  `type` is **omitted**: a company can reach us from a landline registered on
+  WhatsApp Business, so "mobile" would be wrong; no label is correct for both.
 - `names: [{ unstructuredName: <displayName> }]` — `names` is a **singleton**
   field: at most one entry, or Google answers 400.
 - A new contact is pushed promptly (enqueue on creation), not only by the
   10-minute sweep. Matching before create stays: search by phone, adopt an exact
   match instead of duplicating.
+
+## Names and company are not decided here
+
+The WhatsApp push name is stored as-is, and only names a **new** contact — it
+never overwrites an existing name (several attendants may write from one
+company number, and the push name changes per person). The founder writes
+"Name @ Company" in his phone book, so that string lands in `displayName`.
+Splitting it, renaming and filling company are **not** done by rules in this
+front: they come as **private suggestions to the attendant** from the observer
+(ticket by ticket) or the general copilot, approved on screen — front 2
+(`docs/intent/bosun-v1.md`). This front only guarantees the right identity.
 
 ## Data
 
