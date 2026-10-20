@@ -584,8 +584,8 @@ invitation:create`): lista + convites pendentes com **link copiável
   `auto_sync_since`, varredura `contact-google-sweep` a cada 10 min,
   gatilho nas edições, resumo do card em uma consulta SQL com contador/faixa
   de falhas e última varredura, `metadata.google` fora do navegador; sem
-  `batch*Contacts` por decisão — reavaliar se a base real pedir; falta
-  teste manual no staging). Spec em
+  `batch*Contacts` por decisão — reavaliar se a base real pedir; validada no
+  staging em 2026-10-18). Spec em
   `docs/product/contacts-google-sync.md`. Depois: Calendar, Gmail tools. Em
   aberto: toast de retorno do Google duplicado no dev (checar em build de
   produção). **Antes/dentro da slice 3** (achados do review pré-ship da
