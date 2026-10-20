@@ -178,6 +178,8 @@ export async function ingestMessageReceived(
   const contact = await upsertContact(executor, conn.organizationId, {
     channelUserId: event.from.channelUserId,
     displayName: event.from.displayName,
+    nameOnlyIfNew: true,
+    metadata: event.from.lid ? { lid: event.from.lid } : undefined,
   });
   await enqueueAvatarHeal(executor, conn, { contact, deps });
   const { conversation, created } = await findOrCreateTicket(executor, {

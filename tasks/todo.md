@@ -15,9 +15,9 @@ Sem PR a cada slice.
 
 ## 2. Contato por telefone na ingestão (M)
 
-- [ ] `upsertContact` por `channelUserId` (telefone); guarda `metadata.lid`
-- [ ] Nome do WhatsApp só em contato **novo** (não sobrescreve)
-- [ ] Ticket usa `contact.channelUserId`; presença resolve `chatId` LID pelo alias
+- [x] `upsertContact` por `channelUserId` (telefone); guarda `metadata.lid`
+- [x] Nome do WhatsApp só em contato **novo** (não sobrescreve)
+- [x] Ticket usa `contact.channelUserId`; presença resolve `chatId` LID pelo alias
 
 **Acceptance:** mensagem por LID com `SenderAlt` reaproveita o contato existente do telefone; outbound-first e inbound caem no mesmo ticket; presença por LID chega ao ticket certo.
 **Verify:** `pnpm --filter @crm/core test:integration` (ingest, outbound-first, presença)

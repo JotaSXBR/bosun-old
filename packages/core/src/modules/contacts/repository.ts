@@ -56,6 +56,19 @@ export async function findContactById(
   return row;
 }
 
+/** Contact that carries `lid` as its WhatsApp alias (call inside withTenant). */
+export async function findContactByLid(
+  executor: DbExecutor,
+  lid: string,
+): Promise<ContactRow | undefined> {
+  const [row] = await executor
+    .select()
+    .from(contacts)
+    .where(sql`${contacts.metadata}->>'lid' = ${lid}`)
+    .limit(1);
+  return row;
+}
+
 const PROFILE_KEYS = [
   "email",
   "phone",

@@ -43,6 +43,12 @@ export async function upsertContact(
   values: {
     channelUserId: string;
     displayName?: string | undefined;
+    /**
+     * The incoming name only fills a missing one. WhatsApp push names must not
+     * overwrite an attendant rename, and one company number is written by
+     * several people whose push names differ.
+     */
+    nameOnlyIfNew?: boolean | undefined;
     /** Shallow-merged into the stored metadata jsonb (new keys win). */
     metadata?: Record<string, unknown> | undefined;
   },
@@ -58,7 +64,9 @@ export async function upsertContact(
     .onConflictDoUpdate({
       target: [contacts.organizationId, contacts.channelUserId],
       set: {
-        displayName: sql`coalesce(excluded.display_name, ${contacts.displayName})`,
+        displayName: values.nameOnlyIfNew
+          ? sql`coalesce(${contacts.displayName}, excluded.display_name)`
+          : sql`coalesce(excluded.display_name, ${contacts.displayName})`,
         metadata: sql`${contacts.metadata} || excluded.metadata`,
         updatedAt: new Date(),
       },

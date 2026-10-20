@@ -2,6 +2,7 @@ export { isWhatsAppChatId, normalizeWhatsAppChatId } from "./phone";
 export type { ContactListRow, ContactRow } from "./repository";
 export {
   findContactById,
+  findContactByLid,
   listPendingGoogleSyncContacts,
   pageContactsForSync,
   summarizeGoogleSync,

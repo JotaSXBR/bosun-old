@@ -3,6 +3,7 @@ import { applyConnectionStatus } from "@crm/core/integrations";
 import type { DbExecutor } from "@crm/db";
 import { emitDomainEvent } from "@crm/db";
 
+import { findContactByLid } from "../contacts";
 import {
   applyMessageEdit,
   findActiveTicket,
@@ -170,7 +171,13 @@ export async function ingestContactPresence(
   conn: ConnectionRef,
   event: Extract<ChannelEvent, { type: "contact.presence" }>,
 ): Promise<IngestedEvent> {
-  const conversation = await findActiveTicket(executor, conn.id, event.chatId);
+  // Presence names the chat by its @lid; tickets are keyed by the phone.
+  const byLid = event.chatId.endsWith("@lid")
+    ? await findContactByLid(executor, event.chatId)
+    : null;
+  const conversation =
+    (await findActiveTicket(executor, conn.id, event.chatId)) ??
+    (byLid ? await findActiveTicket(executor, conn.id, byLid.channelUserId) : undefined);
   if (!conversation) return { eventType: event.type, messageId: null };
   await emitDomainEvent(executor, {
     type: "contact.presence",
