@@ -4,6 +4,7 @@ import { emitDomainEvent, schema } from "@crm/db";
 import { eq } from "drizzle-orm";
 
 import { completeStepInTx } from "../onboarding";
+import { mergeLidContact } from "./contact-merge";
 import type { ConnectionRef, IngestDeps, IngestedEvent } from "./ingest-events";
 import type { ContactRow, ConversationRow, MessageRow } from "./repository";
 import {
@@ -181,6 +182,7 @@ export async function ingestMessageReceived(
     nameOnlyIfNew: true,
     metadata: event.from.lid ? { lid: event.from.lid } : undefined,
   });
+  if (event.from.lid) await mergeLidContact(executor, contact, event.from.lid);
   await enqueueAvatarHeal(executor, conn, { contact, deps });
   const { conversation, created } = await findOrCreateTicket(executor, {
     organizationId: conn.organizationId,

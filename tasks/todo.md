@@ -35,10 +35,10 @@ Sem PR a cada slice.
 
 ## 4. Mesclagem do contato LID no contato do telefone (M)
 
-- [ ] Ao chegar `SenderAlt`, se existe contato com `channelUserId = <lid>`, mescla no do telefone numa transação
-- [ ] Reaponta conversas (`contact_id` e `external_id`), mensagens, deals, cérebro e site-chat
-- [ ] Conflito de ticket ativo (os dois contatos têm ticket aberto na mesma conexão): une as mensagens no ticket do telefone
-- [ ] Idempotente; o contato LID some; nome: manual > Google > push name
+- [x] Ao chegar `SenderAlt`, se existe contato com `channelUserId = <lid>`, mescla no do telefone numa transação
+- [x] Reaponta conversas (`contact_id` e `external_id`), mensagens, deals, cérebro e site-chat
+- [x] Conflito de ticket ativo (os dois contatos têm ticket aberto na mesma conexão): une as mensagens no ticket do telefone
+- [x] Idempotente; o contato LID some; nome: manual > Google > push name
 
 **Acceptance:** nenhuma mensagem ou conversa se perde; rodar duas vezes não muda nada; não mistura dados entre organizações.
 **Verify:** teste de integração (cenário sem conflito, com conflito, e cross-org)
