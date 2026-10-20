@@ -261,7 +261,7 @@ describe("concurrent webhooks", () => {
       ingest(a, received("r_3", { channelUserId: lid })),
     ]);
     const failed = results.filter((r) => r.status === "rejected");
-    expect(failed.map((r) => String((r as PromiseRejectedResult).reason))).toEqual([]);
+    expect(failed.map((r) => String(r.reason))).toEqual([]);
 
     await ingest(a, received("r_4", { channelUserId: phone, lid }));
     expect((await contactsOf(a)).filter((c) => c.channelUserId === lid)).toHaveLength(0);
