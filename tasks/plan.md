@@ -57,6 +57,8 @@ packages/core/src/modules/messaging/**
 packages/core/src/modules/contacts/**
 packages/core/src/modules/external-connections/**
 packages/db/src/schema/messaging.ts
+packages/db/src/schema/ticket-state.ts
+packages/db/src/schema/index.ts
 packages/db/migrations/**
 apps/web/src/app/api/webhooks/channels/**
 

@@ -1,5 +1,5 @@
 {
-  "id": "bfb03dd1-759d-4dac-8a35-1b008bd52bc6",
+  "id": "4be0e5ad-cc98-4598-91cc-4f021025fdf3",
   "prevId": "b011c1ce-1768-4180-8ea9-6cf6c41bd91e",
   "version": "7",
   "dialect": "postgresql",
@@ -3956,7 +3956,6 @@
             }
           ],
           "isUnique": true,
-          "where": "\"contacts\".\"metadata\"->>'lid' is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
