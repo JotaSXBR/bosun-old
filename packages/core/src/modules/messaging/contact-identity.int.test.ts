@@ -123,3 +123,28 @@ describe("contact identity by phone", () => {
     expect(lidContact?.metadata).toEqual({});
   });
 });
+
+describe("lid alias uniqueness", () => {
+  it("refuses a second contact with the same lid in an organization but not in another", async () => {
+    const other = await db
+      .insert(organizations)
+      .values({ name: "Identity IT 2", slug: `identity2-${crypto.randomUUID().slice(0, 8)}` })
+      .returning({ id: organizations.id });
+    const otherId = other[0]!.id;
+    try {
+      const insert = (organizationId: string, channelUserId: string) =>
+        withTenant(db, organizationId, (tx) =>
+          tx.insert(contacts).values({
+            organizationId,
+            channelUserId,
+            metadata: { lid: "777@lid" },
+          }),
+        );
+      await insert(orgId, "5511911111111@c.us");
+      await expect(insert(orgId, "5511922222222@c.us")).rejects.toThrow();
+      await expect(insert(otherId, "5511911111111@c.us")).resolves.toBeDefined();
+    } finally {
+      await db.delete(organizations).where(eq(organizations.id, otherId));
+    }
+  });
+});

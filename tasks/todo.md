@@ -25,9 +25,9 @@ Sem PR a cada slice.
 
 ## 3. Índice único do alias (S)
 
-- [ ] Confirmar a sintaxe do Drizzle (Context7) e registrar em `## Fontes consultadas`
-- [ ] Migração `0036`: índice único parcial `(organization_id, (metadata->>'lid'))`
-- [ ] `pnpm db:generate` revisado; teste: o mesmo LID não vira dois contatos na mesma org e é livre em outra org
+- [x] Confirmar a sintaxe do Drizzle (Context7) e registrar em `## Fontes consultadas`
+- [x] Migração `0036`: índice único parcial `(organization_id, (metadata->>'lid'))`
+- [x] `pnpm db:generate` revisado; teste: o mesmo LID não vira dois contatos na mesma org e é livre em outra org
 
 **Acceptance:** o banco recusa dois contatos com o mesmo LID na org; isolamento entre orgs preservado.
 **Verify:** `pnpm db:migrate` · teste de integração de isolamento

@@ -88,6 +88,10 @@ export const contacts = pgTable(
   },
   (t) => [
     uniqueIndex("contacts_org_channel_user_idx").on(t.organizationId, t.channelUserId),
+    // One WhatsApp `@lid` alias belongs to one contact per organization.
+    uniqueIndex("contacts_org_lid_idx")
+      .on(t.organizationId, sql`(${t.metadata}->>'lid')`)
+      .where(sql`${t.metadata}->>'lid' is not null`),
     index("contacts_org_idx").on(t.organizationId),
     pgPolicy("contacts_tenant_isolation", {
       for: "all",

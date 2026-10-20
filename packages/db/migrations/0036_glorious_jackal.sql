@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "contacts_org_lid_idx" ON "contacts" USING btree ("organization_id",("metadata"->>'lid')) WHERE "contacts"."metadata"->>'lid' is not null;

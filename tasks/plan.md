@@ -38,12 +38,12 @@ Decisões do fundador (entrevista de 2026-10-20), não só o quê:
 
 ## Fontes consultadas
 
-| Tema                          | Versão / alvo           | Fonte                                                          | Data       | O que confirmou                                                                                     |
-| ----------------------------- | ----------------------- | -------------------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------- |
-| WAHA `SenderAlt` / LID        | 2026.9.2 (GOWS)         | Context7 `/devlikeapro/waha-docs` + payload real do staging    | 2026-10-20 | `from` = LID; `_data.Info.SenderAlt` = `<dígitos>:<device>@s.whatsapp.net`; webhook respondeu `200` |
-| People API `createContact`    | v1                      | Context7 `/websites/developers_google_people`                  | 2026-10-20 | `phoneNumbers[].value`; `canonicalForm` só saída; `type` opcional; `names` é singleton (2 → 400)    |
-| Drizzle índice único parcial  | versão do `packages/db` | **UNVERIFIED** — consultar Context7 antes da migração (task 3) | —          | sintaxe de índice sobre expressão `(metadata->>'lid')` com `where`                                  |
-| GOWS: envio para `<tel>@c.us` | 2026.9.2                | **UNVERIFIED** — validar no staging (task 6)                   | —          | resposta ao contato sai para o chat do telefone e é entregue                                        |
+| Tema                          | Versão / alvo                    | Fonte                                                           | Data       | O que confirmou                                                                                                                                              |
+| ----------------------------- | -------------------------------- | --------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| WAHA `SenderAlt` / LID        | 2026.9.2 (GOWS)                  | Context7 `/devlikeapro/waha-docs` + payload real do staging     | 2026-10-20 | `from` = LID; `_data.Info.SenderAlt` = `<dígitos>:<device>@s.whatsapp.net`; webhook respondeu `200`                                                          |
+| People API `createContact`    | v1                               | Context7 `/websites/developers_google_people`                   | 2026-10-20 | `phoneNumbers[].value`; `canonicalForm` só saída; `type` opcional; `names` é singleton (2 → 400)                                                             |
+| Drizzle índice único parcial  | drizzle-orm 0.45.3 / kit 0.31.11 | Context7 `/drizzle-team/drizzle-orm-docs` (indexes-constraints) | 2026-10-20 | `uniqueIndex(nome).on(col, sql\`expr\`).where(sql\`…\`)`; índice com expressão exige nome manual; `db:generate`gerou o`CREATE UNIQUE INDEX … WHERE` esperado |
+| GOWS: envio para `<tel>@c.us` | 2026.9.2                         | **UNVERIFIED** — validar no staging (task 6)                    | —          | resposta ao contato sai para o chat do telefone e é entregue                                                                                                 |
 
 ## Escopo
 
