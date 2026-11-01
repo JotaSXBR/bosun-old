@@ -6,7 +6,7 @@
   "main": "./index.mjs",
   "exports": "./index.mjs",
   "dependencies": {
-    "prettier": "3.9.9",
+    "prettier": "3.9.10",
     "prettier-plugin-tailwindcss": "0.8.1"
   }
 }
