@@ -42,8 +42,8 @@
     "@crm/db": "workspace:*",
     "@crm/observability": "workspace:*",
     "@crm/permissions": "workspace:*",
-    "zod": "4.6.5",
-    "drizzle-orm": "0.45.3"
+    "zod": "4.6.7",
+    "drizzle-orm": "0.45.4"
   },
   "devDependencies": {
     "@crm/eslint-config": "workspace:*",
@@ -51,8 +51,8 @@
     "@types/node": "^26",
     "eslint": "9.39.2",
     "typescript": "6.0.3",
-    "vitest": "5.0.3",
+    "vitest": "5.0.5",
     "@crm/config": "workspace:*",
-    "@vitest/coverage-v8": "5.0.3"
+    "@vitest/coverage-v8": "5.0.5"
   }
 }

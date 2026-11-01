@@ -13,7 +13,7 @@
     "test:coverage": "vitest run --passWithNoTests --coverage --exclude \"**/*.int.test.ts\" --exclude \"**/node_modules/**\""
   },
   "dependencies": {
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@crm/eslint-config": "workspace:*",
@@ -21,7 +21,7 @@
     "@types/node": "^26",
     "eslint": "9.39.2",
     "typescript": "6.0.3",
-    "vitest": "5.0.3",
-    "@vitest/coverage-v8": "5.0.3"
+    "vitest": "5.0.5",
+    "@vitest/coverage-v8": "5.0.5"
   }
 }
